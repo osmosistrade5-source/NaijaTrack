@@ -17,6 +17,7 @@ import {
   Plus, 
   MessageSquare,
   ArrowRight,
+  ArrowUpRight,
   ChevronRight,
   Globe,
   ShieldCheck,
@@ -1038,12 +1039,40 @@ const AdminDashboard = () => {
   const [stats, setStats] = useState<any>(null);
   const [activeTab, setActiveTab] = useState("overview");
   const [financeOpen, setFinanceOpen] = useState(true);
+  const [showWithdraw, setShowWithdraw] = useState(false);
+  const [withdrawForm, setWithdrawForm] = useState({ amount: "", bank: "", account: "" });
 
-  useEffect(() => {
+  const fetchStats = () => {
     fetch("/api/admin/stats")
       .then(res => res.json())
       .then(setStats);
+  };
+
+  useEffect(() => {
+    fetchStats();
   }, []);
+
+  const handleWithdraw = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const res = await fetch("/api/admin/withdraw", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        amount: parseFloat(withdrawForm.amount),
+        bank_name: withdrawForm.bank,
+        account_number: withdrawForm.account
+      })
+    });
+
+    if (res.ok) {
+      setShowWithdraw(false);
+      setWithdrawForm({ amount: "", bank: "", account: "" });
+      fetchStats();
+    } else {
+      const err = await res.json();
+      alert(err.error || "Withdrawal failed");
+    }
+  };
 
   const menuItems = [
     { id: "overview", label: "Overview", icon: LayoutDashboard },
@@ -1212,9 +1241,18 @@ const AdminDashboard = () => {
 
               <div className="bg-zinc-900 text-white p-12 rounded-[50px] relative overflow-hidden">
                 <div className="relative z-10">
-                  <h3 className="text-3xl font-bold mb-4">Total Platform Revenue</h3>
+                  <div className="flex justify-between items-start mb-4">
+                    <h3 className="text-3xl font-bold">Available Platform Balance</h3>
+                    <button 
+                      onClick={() => setShowWithdraw(true)}
+                      className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-3 rounded-2xl font-bold flex items-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
+                    >
+                      <ArrowUpRight size={18} />
+                      Withdraw to Bank
+                    </button>
+                  </div>
                   <div className="text-6xl font-bold text-emerald-400 mb-8">
-                    ₦{(stats.total_commissions + stats.total_subscription_revenue).toLocaleString()}
+                    ₦{stats.balance?.toLocaleString() || "0"}
                   </div>
                   <div className="grid grid-cols-2 gap-8 max-w-md">
                     <div>
@@ -1242,7 +1280,76 @@ const AdminDashboard = () => {
             </div>
           )}
 
-          {activeTab !== "overview" && (
+          {activeTab === "wallet" && (
+            <div className="space-y-8">
+              <div className="flex justify-between items-end">
+                <div>
+                  <h2 className="text-3xl font-bold text-zinc-900 tracking-tight">Platform Wallet</h2>
+                  <p className="text-zinc-500">Manage platform revenue and withdrawals</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
+                  <div className="text-sm text-zinc-400 font-bold uppercase tracking-widest mb-1">Available Balance</div>
+                  <div className="text-3xl font-bold text-zinc-900">₦{stats.balance?.toLocaleString() || "0"}</div>
+                </div>
+                <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
+                  <div className="text-sm text-zinc-400 font-bold uppercase tracking-widest mb-1">Total Commissions</div>
+                  <div className="text-3xl font-bold text-zinc-900">₦{stats.total_commissions.toLocaleString()}</div>
+                </div>
+                <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
+                  <div className="text-sm text-zinc-400 font-bold uppercase tracking-widest mb-1">Subscription Revenue</div>
+                  <div className="text-3xl font-bold text-zinc-900">₦{stats.total_subscription_revenue.toLocaleString()}</div>
+                </div>
+              </div>
+
+              <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
+                <h3 className="font-bold text-zinc-900 mb-6">Withdrawal History</h3>
+                <div className="overflow-hidden rounded-2xl border border-zinc-100">
+                  <table className="w-full text-left">
+                    <thead className="bg-zinc-50 border-b border-zinc-100">
+                      <tr>
+                        <th className="px-6 py-4 text-xs font-bold text-zinc-400 uppercase">Date</th>
+                        <th className="px-6 py-4 text-xs font-bold text-zinc-400 uppercase">Bank Details</th>
+                        <th className="px-6 py-4 text-xs font-bold text-zinc-400 uppercase text-right">Amount</th>
+                        <th className="px-6 py-4 text-xs font-bold text-zinc-400 uppercase text-center">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-100">
+                      {stats.withdrawals?.length > 0 ? (
+                        stats.withdrawals.map((w: any) => (
+                          <tr key={w.id} className="hover:bg-zinc-50/50 transition-colors">
+                            <td className="px-6 py-4 text-sm text-zinc-500">
+                              {new Date(w.created_at).toLocaleDateString()}
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="font-bold text-zinc-900">{w.bank_name}</div>
+                              <div className="text-xs text-zinc-500">{w.account_number}</div>
+                            </td>
+                            <td className="px-6 py-4 text-right font-bold text-zinc-900">
+                              ₦{w.amount.toLocaleString()}
+                            </td>
+                            <td className="px-6 py-4 text-center">
+                              <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold uppercase">
+                                {w.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={4} className="px-6 py-12 text-center text-zinc-400 italic">No withdrawals yet</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab !== "overview" && activeTab !== "wallet" && (
             <div className="flex flex-col items-center justify-center py-24 text-center">
               <div className="w-20 h-20 bg-zinc-100 text-zinc-400 rounded-3xl flex items-center justify-center mb-6">
                 <ShieldCheck size={40} />
@@ -1253,6 +1360,91 @@ const AdminDashboard = () => {
           )}
         </div>
       </main>
+
+      {/* Admin Withdraw Modal */}
+      <AnimatePresence>
+        {showWithdraw && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowWithdraw(false)}
+              className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
+            >
+              <div className="p-8">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center">
+                    <Banknote size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-bold text-zinc-900">Platform Payout</h3>
+                    <p className="text-xs text-zinc-500">Withdraw revenue to corporate account</p>
+                  </div>
+                </div>
+                
+                <form onSubmit={handleWithdraw} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Withdrawal Amount (₦)</label>
+                    <input 
+                      required
+                      type="number"
+                      className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all"
+                      placeholder="0.00"
+                      max={stats.balance}
+                      value={withdrawForm.amount}
+                      onChange={e => setWithdrawForm({...withdrawForm, amount: e.target.value})}
+                    />
+                    <p className="mt-1 text-[10px] text-zinc-400">Available: ₦{stats.balance?.toLocaleString()}</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Bank Name</label>
+                    <input 
+                      required
+                      className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all"
+                      placeholder="e.g. Access Bank, Zenith"
+                      value={withdrawForm.bank}
+                      onChange={e => setWithdrawForm({...withdrawForm, bank: e.target.value})}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Account Number</label>
+                    <input 
+                      required
+                      className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all"
+                      placeholder="10 digits"
+                      maxLength={10}
+                      value={withdrawForm.account}
+                      onChange={e => setWithdrawForm({...withdrawForm, account: e.target.value})}
+                    />
+                  </div>
+                  <div className="pt-4 flex gap-3">
+                    <button 
+                      type="button"
+                      onClick={() => setShowWithdraw(false)}
+                      className="flex-1 px-6 py-3 rounded-xl font-bold text-zinc-500 hover:bg-zinc-50 transition-all"
+                    >
+                      Cancel
+                    </button>
+                    <button 
+                      type="submit"
+                      className="flex-1 bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-500/20"
+                    >
+                      Confirm Payout
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

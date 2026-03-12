@@ -29,15 +29,28 @@ try {
 try {
   db.exec("ALTER TABLE brands ADD COLUMN last_payment_date DATETIME");
 } catch (e) {}
+try {
+  db.exec("ALTER TABLE platform_stats ADD COLUMN balance REAL DEFAULT 0");
+} catch (e) {}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS platform_stats (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     total_commissions REAL DEFAULT 0,
-    total_subscription_revenue REAL DEFAULT 0
+    total_subscription_revenue REAL DEFAULT 0,
+    balance REAL DEFAULT 0
   );
 
-  INSERT OR IGNORE INTO platform_stats (id, total_commissions, total_subscription_revenue) VALUES (1, 0, 0);
+  INSERT OR IGNORE INTO platform_stats (id, total_commissions, total_subscription_revenue, balance) VALUES (1, 0, 0, 0);
+
+  CREATE TABLE IF NOT EXISTS platform_withdrawals (
+    id TEXT PRIMARY KEY,
+    amount REAL NOT NULL,
+    bank_name TEXT NOT NULL,
+    account_number TEXT NOT NULL,
+    status TEXT DEFAULT 'completed',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 
   CREATE TABLE IF NOT EXISTS campaigns (
     id TEXT PRIMARY KEY,
@@ -170,7 +183,7 @@ async function startServer() {
       SET subscription_status = 'active', last_payment_date = CURRENT_TIMESTAMP 
       WHERE id = ?
     `).run(id);
-    db.prepare("UPDATE platform_stats SET total_subscription_revenue = total_subscription_revenue + ? WHERE id = 1").run(fee);
+    db.prepare("UPDATE platform_stats SET total_subscription_revenue = total_subscription_revenue + ?, balance = balance + ? WHERE id = 1").run(fee, fee);
     res.json({ success: true });
   });
 
@@ -322,13 +335,36 @@ async function startServer() {
     const brands = db.prepare("SELECT COUNT(*) as count FROM brands").get();
     const influencers = db.prepare("SELECT COUNT(*) as count FROM influencers").get();
     const activeSubscriptions = db.prepare("SELECT COUNT(*) as count FROM brands WHERE subscription_status = 'active'").get();
+    const withdrawals = db.prepare("SELECT * FROM platform_withdrawals ORDER BY created_at DESC").all();
     
     res.json({ 
       ...stats, 
       brandCount: (brands as any).count, 
       influencerCount: (influencers as any).count,
-      activeSubscriptions: (activeSubscriptions as any).count
+      activeSubscriptions: (activeSubscriptions as any).count,
+      withdrawals
     });
+  });
+
+  app.post("/api/admin/withdraw", (req, res) => {
+    const { amount, bank_name, account_number } = req.body;
+    const stats = db.prepare("SELECT balance FROM platform_stats WHERE id = 1").get() as any;
+
+    if (!stats || stats.balance < amount) {
+      return res.status(400).json({ error: "Insufficient platform balance" });
+    }
+
+    const id = Math.random().toString(36).substring(2, 9);
+    const transaction = db.transaction(() => {
+      db.prepare("UPDATE platform_stats SET balance = balance - ? WHERE id = 1").run(amount);
+      db.prepare(`
+        INSERT INTO platform_withdrawals (id, amount, bank_name, account_number)
+        VALUES (?, ?, ?, ?)
+      `).run(id, amount, bank_name, account_number);
+    });
+
+    transaction();
+    res.json({ success: true, id });
   });
 
   // Tracking Redirect
@@ -400,7 +436,7 @@ async function startServer() {
       `).run(influencerShare, influencerShare, details.influencer_id);
 
       // Track platform commission
-      db.prepare("UPDATE platform_stats SET total_commissions = total_commissions + ? WHERE id = 1").run(commission);
+      db.prepare("UPDATE platform_stats SET total_commissions = total_commissions + ?, balance = balance + ? WHERE id = 1").run(commission, commission);
 
       return { ...details, commission, influencerShare };
     });
