@@ -18,7 +18,8 @@ db.exec(`
     name TEXT NOT NULL,
     email TEXT UNIQUE NOT NULL,
     subscription_status TEXT DEFAULT 'inactive', -- active, inactive
-    last_payment_date DATETIME
+    last_payment_date DATETIME,
+    balance REAL DEFAULT 0
   );
 `);
 
@@ -28,6 +29,9 @@ try {
 } catch (e) {}
 try {
   db.exec("ALTER TABLE brands ADD COLUMN last_payment_date DATETIME");
+} catch (e) {}
+try {
+  db.exec("ALTER TABLE brands ADD COLUMN balance REAL DEFAULT 0");
 } catch (e) {}
 try {
   db.exec("ALTER TABLE platform_stats ADD COLUMN balance REAL DEFAULT 0");
@@ -173,6 +177,20 @@ async function startServer() {
   app.get("/api/brands", (req, res) => {
     const brands = db.prepare("SELECT * FROM brands").all();
     res.json(brands);
+  });
+
+  app.get("/api/brands/:id/wallet", (req, res) => {
+    const { id } = req.params;
+    const brand = db.prepare("SELECT balance, name FROM brands WHERE id = ?").get(id);
+    if (!brand) return res.status(404).json({ error: "Brand not found" });
+    res.json(brand);
+  });
+
+  app.post("/api/brands/:id/deposit", (req, res) => {
+    const { id } = req.params;
+    const { amount } = req.body;
+    db.prepare("UPDATE brands SET balance = balance + ? WHERE id = ?").run(amount, id);
+    res.json({ success: true });
   });
 
   app.post("/api/brands/:id/subscribe", (req, res) => {
@@ -404,11 +422,36 @@ async function startServer() {
     const { click_id, amount } = req.body;
     const id = Math.random().toString(36).substring(2, 9);
     
+    // Get campaign details first to check brand balance
+    const campaignDetails = db.prepare(`
+      SELECT 
+        b.id as brand_id,
+        b.balance as brand_balance,
+        c.payout_per_lead
+      FROM clicks cl
+      JOIN campaign_links link ON cl.link_id = link.id
+      JOIN campaigns c ON link.campaign_id = c.id
+      JOIN brands b ON c.brand_id = b.id
+      WHERE cl.id = ?
+    `).get(click_id) as any;
+
+    if (!campaignDetails) {
+      return res.status(404).json({ error: "Invalid click ID" });
+    }
+
+    if (campaignDetails.brand_balance < campaignDetails.payout_per_lead) {
+      return res.status(400).json({ error: "Brand has insufficient campaign funds. Payout failed." });
+    }
+
     const transaction = db.transaction(() => {
       db.prepare(`
         INSERT INTO conversions (id, click_id, status, amount, confirmed_at)
         VALUES (?, ?, 'confirmed', ?, CURRENT_TIMESTAMP)
       `).run(id, click_id, amount);
+
+      // Deduct from brand wallet
+      db.prepare("UPDATE brands SET balance = balance - ? WHERE id = ?")
+        .run(campaignDetails.payout_per_lead, campaignDetails.brand_id);
 
       // Credit influencer wallet (minus 7% commission)
       const details = db.prepare(`

@@ -197,7 +197,8 @@ const BrandDashboard = () => {
   const [stats, setStats] = useState<CampaignStat[]>([]);
   const [allInfluencers, setAllInfluencers] = useState<Influencer[]>([]);
   const [showAssign, setShowAssign] = useState(false);
-
+  const [showDeposit, setShowDeposit] = useState(false);
+  const [depositAmount, setDepositAmount] = useState("");
   const [newCampaign, setNewCampaign] = useState({
     title: "",
     description: "",
@@ -274,11 +275,26 @@ const BrandDashboard = () => {
     const res = await fetch("/api/campaigns", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...newCampaign, brand_id: "demo_brand" })
+      body: JSON.stringify({ ...newCampaign, brand_id: selectedBrand?.id })
     });
     if (res.ok) {
       setShowCreate(false);
       fetchCampaigns();
+    }
+  };
+
+  const handleDeposit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedBrand) return;
+    const res = await fetch(`/api/brands/${selectedBrand.id}/deposit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount: parseFloat(depositAmount) })
+    });
+    if (res.ok) {
+      setShowDeposit(false);
+      setDepositAmount("");
+      fetchBrands();
     }
   };
 
@@ -303,22 +319,58 @@ const BrandDashboard = () => {
           </div>
         </div>
         
-        {selectedBrand?.subscription_status === 'inactive' ? (
-          <button 
-            onClick={handleSubscribe}
-            className="bg-emerald-600 text-white px-6 py-3 rounded-full font-semibold hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-lg shadow-emerald-200"
-          >
-            <Wallet size={20} /> Pay Monthly Fee (₦15,000)
-          </button>
-        ) : (
-          <button 
-            onClick={() => setShowCreate(true)}
-            className="bg-zinc-900 text-white px-6 py-3 rounded-full font-semibold hover:bg-zinc-800 transition-all flex items-center gap-2"
-          >
-            <Plus size={20} /> Create Campaign
-          </button>
-        )}
+        <div className="flex flex-col md:flex-row items-start md:items-center gap-4">
+          <div className="bg-white px-6 py-3 rounded-2xl border border-zinc-100 shadow-sm flex items-center gap-4">
+            <div>
+              <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Campaign Funds</div>
+              <div className="text-xl font-bold text-zinc-900">₦{selectedBrand?.balance?.toLocaleString() || "0"}</div>
+            </div>
+            <button 
+              onClick={() => setShowDeposit(true)}
+              className="bg-emerald-50 text-emerald-600 p-2 rounded-xl hover:bg-emerald-100 transition-colors"
+              title="Deposit Funds"
+            >
+              <Plus size={20} />
+            </button>
+          </div>
+
+          {selectedBrand?.subscription_status === 'inactive' ? (
+            <button 
+              onClick={handleSubscribe}
+              className="bg-emerald-600 text-white px-6 py-3 rounded-full font-semibold hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-lg shadow-emerald-200"
+            >
+              <Wallet size={20} /> Pay Monthly Fee (₦15,000)
+            </button>
+          ) : (
+            <button 
+              onClick={() => setShowCreate(true)}
+              className="bg-zinc-900 text-white px-6 py-3 rounded-full font-semibold hover:bg-zinc-800 transition-all flex items-center gap-2"
+            >
+              <Plus size={20} /> Create Campaign
+            </button>
+          )}
+        </div>
       </div>
+
+      {selectedBrand?.balance < 5000 && selectedBrand?.subscription_status === 'active' && (
+        <div className="bg-red-50 border border-red-100 rounded-3xl p-6 mb-8 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center">
+              <ShieldAlert size={24} />
+            </div>
+            <div>
+              <h4 className="font-bold text-red-900">Low Campaign Funds</h4>
+              <p className="text-sm text-red-700">Your balance is low. Influencers will not be paid for new sales if funds are insufficient.</p>
+            </div>
+          </div>
+          <button 
+            onClick={() => setShowDeposit(true)}
+            className="bg-red-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-red-700 transition-all"
+          >
+            Deposit Now
+          </button>
+        </div>
+      )}
 
       {selectedBrand?.subscription_status === 'inactive' && (
         <div className="bg-amber-50 border border-amber-200 rounded-3xl p-8 mb-12 text-center">
@@ -448,6 +500,76 @@ const BrandDashboard = () => {
           )}
         </div>
       </div>
+
+      {/* Deposit Modal */}
+      <AnimatePresence>
+        {showDeposit && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowDeposit(false)}
+              className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
+            >
+              <div className="p-8">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center">
+                    <ArrowDownCircle size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-2xl font-bold text-zinc-900">Deposit Funds</h3>
+                    <p className="text-xs text-zinc-500">Add funds to your campaign wallet</p>
+                  </div>
+                </div>
+                
+                <form onSubmit={handleDeposit} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Amount to Deposit (₦)</label>
+                    <input 
+                      required
+                      type="number"
+                      className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all"
+                      placeholder="e.g. 50000"
+                      min="1000"
+                      value={depositAmount}
+                      onChange={e => setDepositAmount(e.target.value)}
+                    />
+                  </div>
+                  <div className="p-4 bg-zinc-50 rounded-2xl border border-zinc-100">
+                    <p className="text-[10px] text-zinc-400 uppercase font-bold mb-1">Payment Method</p>
+                    <div className="flex items-center gap-2 text-sm font-medium text-zinc-900">
+                      <CreditCard size={16} />
+                      Saved Card (**** 4242)
+                    </div>
+                  </div>
+                  <div className="pt-4 flex gap-3">
+                    <button 
+                      type="button"
+                      onClick={() => setShowDeposit(false)}
+                      className="flex-1 px-6 py-3 rounded-xl font-bold text-zinc-500 hover:bg-zinc-50 transition-all"
+                    >
+                      Cancel
+                    </button>
+                    <button 
+                      type="submit"
+                      className="flex-1 bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-500/20"
+                    >
+                      Confirm Deposit
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Assign Modal */}
       <AnimatePresence>
