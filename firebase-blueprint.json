@@ -1,0 +1,107 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and authentication data",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["ADMIN", "BRAND", "INFLUENCER"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "email", "role"]
+    },
+    "Brand": {
+      "title": "Brand",
+      "description": "Brand specific information",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "companyName": { "type": "string" },
+        "subscriptionStatus": { "type": "string", "enum": ["active", "inactive"] },
+        "balance": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "companyName"]
+    },
+    "Influencer": {
+      "title": "Influencer",
+      "description": "Influencer specific information",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "niche": { "type": "string" },
+        "followers": { "type": "integer" },
+        "walletBalance": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId"]
+    },
+    "Campaign": {
+      "title": "Campaign",
+      "description": "Marketing campaign created by a brand",
+      "type": "object",
+      "properties": {
+        "brandId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "budget": { "type": "number" },
+        "status": { "type": "string", "enum": ["DRAFT", "ACTIVE", "PAUSED", "COMPLETED"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["brandId", "title", "budget"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "Assignment for an influencer within a campaign",
+      "type": "object",
+      "properties": {
+        "campaignId": { "type": "string" },
+        "influencerId": { "type": "string" },
+        "status": { "type": "string", "enum": ["PENDING", "COMPLETED", "APPROVED", "REJECTED"] },
+        "submission": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["campaignId", "influencerId", "status"]
+    },
+    "AdminWallet": {
+      "title": "AdminWallet",
+      "description": "Platform-wide financial statistics",
+      "type": "object",
+      "properties": {
+        "totalEarnings": { "type": "number" },
+        "subscriptionRevenue": { "type": "number" },
+        "commissionRevenue": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "brands/{brandId}": {
+      "schema": "Brand",
+      "description": "Brand profiles"
+    },
+    "influencers/{influencerId}": {
+      "schema": "Influencer",
+      "description": "Influencer profiles"
+    },
+    "campaigns/{campaignId}": {
+      "schema": "Campaign",
+      "description": "Campaign documents"
+    },
+    "campaigns/{campaignId}/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "Tasks within a campaign"
+    },
+    "admin/wallet": {
+      "schema": "AdminWallet",
+      "description": "Platform stats"
+    }
+  }
+}

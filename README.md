@@ -1,20 +1,57 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# NaijaTrack Backend
 
-# Run and deploy your AI Studio app
+Production-ready backend for NaijaTrack, connecting brands with influencers for paid campaigns.
 
-This contains everything you need to run your app locally.
+## Tech Stack
+- **Backend:** Node.js (Express.js)
+- **Database:** PostgreSQL (via Prisma ORM)
+- **Auth:** JWT + Role-Based Authentication
+- **Payments:** Paystack
 
-View your app in AI Studio: https://ai.studio/apps/4d14834c-d833-4a87-8144-50440d6d74e7
+## Getting Started
 
-## Run Locally
+### Prerequisites
+- Node.js installed
+- PostgreSQL database (or use SQLite for local development)
 
-**Prerequisites:**  Node.js
+### Installation
+1. Clone the repository
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Set up environment variables:
+   Copy `.env.example` to `.env` and fill in the values.
+4. Initialize the database:
+   ```bash
+   npx prisma db push
+   ```
+5. Start the development server:
+   ```bash
+   npm run dev
+   ```
 
+## API Endpoints
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+### Auth
+- `POST /api/auth/register`: Register a new user (Brand, Influencer, Admin)
+- `POST /api/auth/login`: Login and receive a JWT token
+
+### Brands
+- `GET /api/brands`: List all brands
+- `GET /api/brands/wallet`: Get brand wallet balance (Brand only)
+- `POST /api/brands/subscribe`: Pay monthly subscription fee (Brand only)
+
+### Campaigns
+- `POST /api/campaigns`: Create a new campaign (Brand only)
+- `GET /api/campaigns`: List all campaigns
+
+### Payments
+- `POST /api/payments/fund`: Initialize wallet funding via Paystack
+- `POST /api/payments/webhook`: Paystack webhook for payment verification
+- `POST /api/payments/payout`: Process influencer payout (Admin only)
+
+### Admin
+- `GET /api/admin/stats`: Get platform statistics
+- `GET /api/admin/users`: List all users
+- `GET /api/admin/transactions`: List all transactions

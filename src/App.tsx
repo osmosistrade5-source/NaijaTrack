@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Component, ErrorInfo, ReactNode } from "react";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line, PieChart, Pie, Cell
@@ -34,9 +34,62 @@ import {
   ShieldAlert,
   LifeBuoy,
   Settings,
-  ChevronDown
+  ChevronDown,
+  LogOut
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { auth, loginWithGoogle, logout, db } from "./lib/firebase";
+import { onAuthStateChanged } from "firebase/auth";
+import { doc, getDoc, setDoc, onSnapshot, collection, serverTimestamp } from "firebase/firestore";
+
+// --- Error Boundary ---
+interface ErrorBoundaryProps {
+  children: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("Uncaught error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-zinc-50 p-4">
+          <div className="max-w-md w-full bg-white rounded-3xl shadow-xl p-8 border border-zinc-200 text-center">
+            <div className="w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
+              <ShieldAlert size={32} />
+            </div>
+            <h2 className="text-2xl font-bold text-zinc-900 mb-4">Something went wrong</h2>
+            <p className="text-zinc-500 mb-8">We encountered an error. Please try refreshing the page or contact support.</p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full bg-zinc-900 text-white py-4 rounded-xl font-bold hover:bg-zinc-800 transition-all"
+            >
+              Refresh Page
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 // --- Types ---
 
@@ -65,17 +118,74 @@ interface CampaignStat {
   conversion_count: number;
 }
 
-interface Brand {
+interface User {
   id: string;
   name: string;
   email: string;
-  subscription_status: 'active' | 'inactive';
-  last_payment_date: string | null;
+  role: 'ADMIN' | 'BRAND' | 'INFLUENCER';
 }
 
-// --- Components ---
+interface Brand {
+  id: string;
+  companyName: string;
+  subscriptionStatus: 'active' | 'inactive';
+  balance: number;
+}
 
-const Navbar = ({ activeView, setActiveView }: { activeView: string, setActiveView: (v: string) => void }) => (
+const Auth = () => {
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      await loginWithGoogle();
+    } catch (err: any) {
+      console.error("Login error:", err);
+      setError(err.message || "Authentication failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-zinc-50 px-4">
+      <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 border border-zinc-200">
+        <div className="text-center mb-8">
+          <div className="w-12 h-12 bg-emerald-600 rounded-xl flex items-center justify-center text-white font-bold text-2xl mx-auto mb-4">N</div>
+          <h2 className="text-2xl font-bold text-zinc-900">Welcome to NaijaTrack</h2>
+          <p className="text-zinc-500 mt-2">Influencer & Brand Platform for Nigeria</p>
+        </div>
+
+        <div className="space-y-4">
+          <button
+            onClick={handleGoogleLogin}
+            disabled={loading}
+            className="w-full flex items-center justify-center gap-3 bg-white border border-zinc-300 text-zinc-700 py-3 rounded-xl font-semibold hover:bg-zinc-50 transition-colors shadow-sm disabled:opacity-50"
+          >
+            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
+            {loading ? "Connecting..." : "Continue with Google"}
+          </button>
+
+          {error && (
+            <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-medium">
+              {error}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-8 pt-8 border-t border-zinc-100 text-center">
+          <p className="text-xs text-zinc-400 leading-relaxed">
+            By continuing, you agree to NaijaTrack's Terms of Service and Privacy Policy.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const Navbar = ({ activeView, setActiveView, user, onLogout }: { activeView: string, setActiveView: (v: string) => void, user: User | null, onLogout: () => void }) => (
   <nav className="border-b border-zinc-200 bg-white sticky top-0 z-50">
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <div className="flex justify-between h-16 items-center">
@@ -85,11 +195,10 @@ const Navbar = ({ activeView, setActiveView }: { activeView: string, setActiveVi
         </div>
         <div className="hidden sm:flex gap-8">
           {[
-            { id: "brand", label: "Brands", icon: Megaphone },
-            { id: "influencer", label: "Influencers", icon: Users },
-            { id: "sme", label: "SME Portal", icon: CheckCircle },
-            { id: "analytics", label: "Analytics", icon: TrendingUp },
-          ].map((item) => (
+            { id: "brand", label: "Brands", icon: Megaphone, roles: ["ADMIN", "BRAND"] },
+            { id: "influencer", label: "Influencers", icon: Users, roles: ["ADMIN", "INFLUENCER"] },
+            { id: "analytics", label: "Analytics", icon: TrendingUp, roles: ["ADMIN", "BRAND", "INFLUENCER"] },
+          ].filter(item => !user || item.roles.includes(user.role)).map((item) => (
             <button
               key={item.id}
               onClick={() => setActiveView(item.id)}
@@ -102,12 +211,29 @@ const Navbar = ({ activeView, setActiveView }: { activeView: string, setActiveVi
             </button>
           ))}
         </div>
-        <button 
-          onClick={() => setActiveView("brand")}
-          className="bg-zinc-900 text-white px-4 py-2 rounded-full text-sm font-medium hover:bg-zinc-800 transition-all"
-        >
-          Get Started
-        </button>
+        <div className="flex items-center gap-4">
+          {user ? (
+            <div className="flex items-center gap-4">
+              <div className="text-right hidden md:block">
+                <div className="text-sm font-bold text-zinc-900">{user.name}</div>
+                <div className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">{user.role}</div>
+              </div>
+              <button
+                onClick={onLogout}
+                className="text-sm font-bold text-zinc-500 hover:text-red-600 transition-colors"
+              >
+                Logout
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setActiveView("auth")}
+              className="bg-emerald-600 text-white px-6 py-2 rounded-xl text-sm font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100"
+            >
+              Get Started
+            </button>
+          )}
+        </div>
       </div>
     </div>
   </nav>
@@ -133,16 +259,16 @@ const LandingPage = ({ onStart }: { onStart: (view: string) => void }) => (
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <button 
-              onClick={() => onStart("brand")}
-              className="bg-zinc-900 text-white px-8 py-4 rounded-full font-semibold hover:bg-zinc-800 transition-all flex items-center justify-center gap-2"
+              onClick={() => onStart("auth")}
+              className="bg-emerald-600 text-white px-8 py-4 rounded-2xl font-bold hover:bg-emerald-700 transition-all shadow-xl shadow-emerald-100 flex items-center justify-center gap-2"
             >
-              For Brands <ArrowRight size={20} />
+              I'm a Brand <ArrowRight size={20} />
             </button>
             <button 
-              onClick={() => onStart("influencer")}
-              className="border border-zinc-200 text-zinc-900 px-8 py-4 rounded-full font-semibold hover:bg-zinc-50 transition-all"
+              onClick={() => onStart("auth")}
+              className="bg-white text-zinc-900 border border-zinc-200 px-8 py-4 rounded-2xl font-bold hover:bg-zinc-50 transition-all flex items-center justify-center gap-2"
             >
-              For Influencers
+              I'm an Influencer <ArrowUpRight size={20} />
             </button>
           </div>
         </motion.div>
@@ -188,7 +314,7 @@ const LandingPage = ({ onStart }: { onStart: (view: string) => void }) => (
   </div>
 );
 
-const BrandDashboard = () => {
+const BrandDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: string, options?: RequestInit) => Promise<Response> }) => {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [selectedBrand, setSelectedBrand] = useState<Brand | null>(null);
@@ -225,43 +351,57 @@ const BrandDashboard = () => {
   }, [selectedCampaign]);
 
   const fetchBrands = async () => {
-    const res = await fetch("/api/brands");
+    const res = await authenticatedFetch("/api/brands");
     const data = await res.json();
     setBrands(data);
-    if (data.length > 0 && !selectedBrand) setSelectedBrand(data[0]);
+    if (data.length > 0) {
+      if (!selectedBrand) {
+        setSelectedBrand(data[0]);
+      } else {
+        const updated = data.find((b: any) => b.id === selectedBrand.id);
+        if (updated) setSelectedBrand(updated);
+      }
+    }
   };
 
   const fetchCampaigns = async () => {
-    const res = await fetch("/api/campaigns");
+    const res = await authenticatedFetch("/api/campaigns");
     const data = await res.json();
     setCampaigns(data.filter((c: any) => c.brand_id === selectedBrand?.id));
   };
 
   const handleSubscribe = async () => {
     if (!selectedBrand) return;
-    const res = await fetch(`/api/brands/${selectedBrand.id}/subscribe`, { method: "POST" });
-    if (res.ok) {
-      fetchBrands();
+    try {
+      const res = await authenticatedFetch(`/api/brands/${selectedBrand.id}/subscribe`, { method: "POST" });
+      if (res.ok) {
+        await fetchBrands();
+      } else {
+        const error = await res.json();
+        alert("Subscription failed: " + (error.error || "Unknown error"));
+      }
+    } catch (err) {
+      console.error("Subscription error:", err);
+      alert("An error occurred while processing your subscription.");
     }
   };
 
   const fetchInfluencers = async () => {
-    const res = await fetch("/api/influencers");
+    const res = await authenticatedFetch("/api/influencers");
     const data = await res.json();
     setAllInfluencers(data);
   };
 
   const fetchStats = async (id: string) => {
-    const res = await fetch(`/api/campaigns/${id}/stats`);
+    const res = await authenticatedFetch(`/api/campaigns/${id}/stats`);
     const data = await res.json();
     setStats(data);
   };
 
   const handleAssign = async (influencerId: string) => {
     if (!selectedCampaign) return;
-    const res = await fetch("/api/links", {
+    const res = await authenticatedFetch("/api/links", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ campaign_id: selectedCampaign.id, influencer_id: influencerId })
     });
     if (res.ok) {
@@ -272,10 +412,13 @@ const BrandDashboard = () => {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch("/api/campaigns", {
+    if (!selectedBrand?.id) {
+      alert("Please select a brand first");
+      return;
+    }
+    const res = await authenticatedFetch("/api/campaigns", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...newCampaign, brand_id: selectedBrand?.id })
+      body: JSON.stringify({ ...newCampaign, brand_id: selectedBrand.id })
     });
     if (res.ok) {
       setShowCreate(false);
@@ -286,9 +429,8 @@ const BrandDashboard = () => {
   const handleDeposit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedBrand) return;
-    const res = await fetch(`/api/brands/${selectedBrand.id}/deposit`, {
+    const res = await authenticatedFetch(`/api/brands/${selectedBrand.id}/deposit`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ amount: parseFloat(depositAmount) })
     });
     if (res.ok) {
@@ -309,12 +451,12 @@ const BrandDashboard = () => {
               onChange={(e) => setSelectedBrand(brands.find(b => b.id === e.target.value) || null)}
               className="bg-zinc-100 border-none rounded-lg px-3 py-1 text-sm font-medium outline-none"
             >
-              {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              {brands.map(b => <option key={b.id} value={b.id}>{b.companyName}</option>)}
             </select>
             <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${
-              selectedBrand?.subscription_status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
+              selectedBrand?.subscriptionStatus === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
             }`}>
-              {selectedBrand?.subscription_status || 'inactive'}
+              {selectedBrand?.subscriptionStatus || 'inactive'}
             </span>
           </div>
         </div>
@@ -334,7 +476,7 @@ const BrandDashboard = () => {
             </button>
           </div>
 
-          {selectedBrand?.subscription_status === 'inactive' ? (
+          {selectedBrand?.subscriptionStatus === 'inactive' ? (
             <button 
               onClick={handleSubscribe}
               className="bg-emerald-600 text-white px-6 py-3 rounded-full font-semibold hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-lg shadow-emerald-200"
@@ -352,7 +494,7 @@ const BrandDashboard = () => {
         </div>
       </div>
 
-      {selectedBrand?.balance < 5000 && selectedBrand?.subscription_status === 'active' && (
+      {selectedBrand && selectedBrand.balance < 5000 && selectedBrand.subscriptionStatus === 'active' && (
         <div className="bg-red-50 border border-red-100 rounded-3xl p-6 mb-8 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center">
@@ -372,14 +514,14 @@ const BrandDashboard = () => {
         </div>
       )}
 
-      {selectedBrand?.subscription_status === 'inactive' && (
+      {selectedBrand?.subscriptionStatus === 'inactive' && (
         <div className="bg-amber-50 border border-amber-200 rounded-3xl p-8 mb-12 text-center">
           <h3 className="text-xl font-bold text-amber-900 mb-2">Subscription Required</h3>
           <p className="text-amber-700 max-w-lg mx-auto">Your account is currently inactive. Please pay the monthly platform fee to manage campaigns and view detailed analytics.</p>
         </div>
       )}
 
-      <div className={`grid grid-cols-1 lg:grid-cols-3 gap-8 ${selectedBrand?.subscription_status === 'inactive' ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
+      <div className={`grid grid-cols-1 lg:grid-cols-3 gap-8 ${selectedBrand?.subscriptionStatus === 'inactive' ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
         <div className="lg:col-span-1 space-y-4">
           <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-widest px-2">Your Campaigns</h3>
           {campaigns.map((c) => (
@@ -721,69 +863,25 @@ const BrandDashboard = () => {
   );
 };
 
-const InfluencerDashboard = () => {
+const InfluencerDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: string, options?: RequestInit) => Promise<Response> }) => {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [influencers, setInfluencers] = useState<Influencer[]>([]);
-  const [selectedInfluencer, setSelectedInfluencer] = useState<Influencer | null>(null);
-  const [generatedLinks, setGeneratedLinks] = useState<Record<string, string>>({});
   const [walletData, setWalletData] = useState<any>(null);
-  const [showWithdraw, setShowWithdraw] = useState(false);
-  const [withdrawForm, setWithdrawForm] = useState({ amount: "", bank: "", account: "" });
 
   useEffect(() => {
     fetchData();
+    fetchWallet();
   }, []);
 
-  useEffect(() => {
-    if (selectedInfluencer) {
-      fetchWallet(selectedInfluencer.id);
-    }
-  }, [selectedInfluencer]);
-
   const fetchData = async () => {
-    const [cRes, iRes] = await Promise.all([
-      fetch("/api/campaigns"),
-      fetch("/api/influencers")
-    ]);
-    setCampaigns(await cRes.json());
-    setInfluencers(await iRes.json());
+    const res = await authenticatedFetch("/api/campaigns");
+    const data = await res.json();
+    setCampaigns(data);
   };
 
-  const fetchWallet = async (id: string) => {
-    const res = await fetch(`/api/influencers/${id}/wallet`);
+  const fetchWallet = async () => {
+    const res = await authenticatedFetch("/api/influencers/wallet");
     const data = await res.json();
     setWalletData(data);
-  };
-
-  const handleWithdraw = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedInfluencer) return;
-    const res = await fetch("/api/withdrawals", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        influencer_id: selectedInfluencer.id,
-        amount: parseFloat(withdrawForm.amount),
-        bank_name: withdrawForm.bank,
-        account_number: withdrawForm.account
-      })
-    });
-    if (res.ok) {
-      setShowWithdraw(false);
-      fetchWallet(selectedInfluencer.id);
-      setWithdrawForm({ amount: "", bank: "", account: "" });
-    }
-  };
-
-  const generateLink = async (campaignId: string) => {
-    if (!selectedInfluencer) return;
-    const res = await fetch("/api/links", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ campaign_id: campaignId, influencer_id: selectedInfluencer.id })
-    });
-    const data = await res.json();
-    setGeneratedLinks(prev => ({ ...prev, [campaignId]: data.short_code }));
   };
 
   return (
@@ -793,26 +891,7 @@ const InfluencerDashboard = () => {
         <p className="text-zinc-500">Pick a campaign and start earning</p>
       </div>
 
-      <div className="mb-12">
-        <label className="block text-xs font-bold text-zinc-400 uppercase mb-4">Select Your Profile</label>
-        <div className="flex flex-wrap gap-3">
-          {influencers.map(i => (
-            <button
-              key={i.id}
-              onClick={() => setSelectedInfluencer(i)}
-              className={`px-6 py-3 rounded-full border font-medium transition-all ${
-                selectedInfluencer?.id === i.id 
-                  ? "bg-zinc-900 text-white border-zinc-900" 
-                  : "bg-white text-zinc-600 border-zinc-200 hover:border-zinc-300"
-              }`}
-            >
-              {i.name} (@{i.handle})
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {selectedInfluencer && walletData ? (
+      {walletData ? (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16">
           <div className="lg:col-span-1 bg-zinc-900 text-white p-8 rounded-[40px] shadow-xl relative overflow-hidden">
             <div className="relative z-10">
@@ -822,668 +901,267 @@ const InfluencerDashboard = () => {
                 </div>
                 <span className="text-[10px] font-bold uppercase tracking-widest text-white/40">Available Balance</span>
               </div>
-              <div className="text-4xl font-bold mb-2">₦{walletData.wallet?.balance?.toLocaleString() || "0"}</div>
-              <div className="text-xs text-white/40 mb-8">Total Earned: ₦{walletData.wallet?.total_earned?.toLocaleString() || "0"}</div>
-              <button 
-                onClick={() => setShowWithdraw(true)}
-                className="w-full bg-emerald-500 text-zinc-900 py-4 rounded-2xl font-bold hover:bg-emerald-400 transition-all flex items-center justify-center gap-2"
-              >
-                <ArrowDownCircle size={20} /> Withdraw Funds
-              </button>
+              <div className="text-4xl font-bold mb-2">₦{walletData.influencer?.walletBalance?.toLocaleString() || "0"}</div>
+              <div className="text-xs text-white/40 mb-8">Role: {walletData.influencer?.user?.role}</div>
             </div>
-            {/* Decorative circles */}
             <div className="absolute -top-24 -right-24 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl" />
-            <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl" />
           </div>
 
           <div className="lg:col-span-2 bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
             <div className="flex items-center gap-2 mb-6">
               <History size={20} className="text-zinc-400" />
-              <h3 className="font-bold text-zinc-900">Recent Withdrawals</h3>
+              <h3 className="font-bold text-zinc-900">Recent Transactions</h3>
             </div>
             <div className="space-y-4">
-              {walletData.withdrawals.length > 0 ? walletData.withdrawals.map((w: any) => (
-                <div key={w.id} className="flex justify-between items-center p-4 rounded-2xl bg-zinc-50 border border-zinc-100">
+              {walletData.transactions?.length > 0 ? walletData.transactions.map((t: any) => (
+                <div key={t.id} className="flex justify-between items-center p-4 rounded-2xl bg-zinc-50 border border-zinc-100">
                   <div>
-                    <div className="font-bold text-zinc-900">₦{w.amount.toLocaleString()}</div>
-                    <div className="text-[10px] text-zinc-400 uppercase tracking-tighter">{w.bank_name} • {w.account_number}</div>
+                    <div className="font-bold text-zinc-900">{t.type}</div>
+                    <div className="text-[10px] text-zinc-400 uppercase tracking-tighter">{new Date(t.createdAt).toLocaleString()}</div>
                   </div>
-                  <div className="text-right">
-                    <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase ${
-                      w.status === 'completed' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
-                    }`}>
-                      {w.status}
-                    </span>
-                    <div className="text-[10px] text-zinc-400 mt-1">{new Date(w.created_at).toLocaleDateString()}</div>
+                  <div className={`text-right font-bold ${t.type === 'CREDIT' ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {t.type === 'CREDIT' ? '+' : '-'}₦{t.amount.toLocaleString()}
                   </div>
                 </div>
-              )) : (
-                <div className="text-center py-12 text-zinc-400 text-sm italic">No withdrawal history yet.</div>
-              )}
+              )) : <div className="text-center text-zinc-400 py-8">No transactions yet</div>}
             </div>
           </div>
         </div>
-      ) : (
-        <div className="bg-zinc-100 border-2 border-dashed border-zinc-200 rounded-[40px] p-12 text-center mb-16">
-          <div className="w-16 h-16 bg-zinc-200 rounded-3xl flex items-center justify-center mx-auto mb-4">
-            <Wallet size={32} className="text-zinc-400" />
-          </div>
-          <h3 className="text-lg font-bold text-zinc-900 mb-2">Wallet Locked</h3>
-          <p className="text-zinc-500 max-w-xs mx-auto">Please select an influencer profile above to view your earnings and withdraw funds.</p>
-        </div>
-      )}
+      ) : <div className="p-12 text-center text-zinc-400">Loading wallet...</div>}
 
-      <div className="mb-8">
-        <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Available Campaigns</h3>
-      </div>
-      
+      <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-widest mb-6">Available Campaigns</h3>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {campaigns.map(c => (
-          <div key={c.id} className="bg-white p-8 rounded-3xl border border-zinc-100 shadow-sm flex flex-col">
-            <div className="flex-1">
-              <div className="flex justify-between items-start mb-4">
-                <h3 className="text-xl font-bold text-zinc-900">{c.title}</h3>
-                <span className="bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2 py-1 rounded uppercase">Active</span>
+        {campaigns.map((c) => (
+          <div key={c.id} className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm hover:shadow-md transition-all">
+            <h4 className="text-xl font-bold text-zinc-900 mb-2">{c.title}</h4>
+            <p className="text-zinc-500 text-sm mb-6 line-clamp-2">{c.description}</p>
+            <div className="flex justify-between items-center">
+              <div>
+                <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Payout</div>
+                <div className="text-lg font-bold text-emerald-600">₦{c.payout_per_lead}/lead</div>
               </div>
-              <p className="text-zinc-500 text-sm mb-6 line-clamp-2">{c.description}</p>
-              <div className="flex items-center gap-4 mb-8">
-                <div className="flex-1 p-3 rounded-xl bg-zinc-50 border border-zinc-100">
-                  <div className="text-[10px] font-bold text-zinc-400 uppercase mb-1">Payout</div>
-                  <div className="font-bold text-zinc-900">₦{c.payout_per_lead}</div>
-                  <div className="text-[8px] text-zinc-400 mt-0.5 italic">(-7% platform fee)</div>
-                </div>
-                <div className="flex-1 p-3 rounded-xl bg-zinc-50 border border-zinc-100">
-                  <div className="text-[10px] font-bold text-zinc-400 uppercase mb-1">Budget</div>
-                  <div className="font-bold text-zinc-900">₦{c.budget / 1000}k</div>
-                </div>
-              </div>
-            </div>
-
-            {generatedLinks[c.id] ? (
-              <div className="space-y-3">
-                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-between">
-                  <code className="text-xs font-mono text-emerald-700">
-                    {window.location.origin}/t/{generatedLinks[c.id]}
-                  </code>
-                  <button 
-                    onClick={() => navigator.clipboard.writeText(`${window.location.origin}/t/${generatedLinks[c.id]}`)}
-                    className="text-emerald-600 hover:text-emerald-700"
-                  >
-                    <LinkIcon size={16} />
-                  </button>
-                </div>
-                <p className="text-[10px] text-center text-zinc-400">Share this link in your bio or stories</p>
-              </div>
-            ) : (
-              <button 
-                disabled={!selectedInfluencer}
-                onClick={() => generateLink(c.id)}
-                className={`w-full py-4 rounded-2xl font-bold transition-all ${
-                  selectedInfluencer 
-                    ? "bg-emerald-600 text-white hover:bg-emerald-700" 
-                    : "bg-zinc-100 text-zinc-400 cursor-not-allowed"
-                }`}
-              >
-                Generate Trackable Link
+              <button className="bg-zinc-100 text-zinc-900 px-4 py-2 rounded-xl text-xs font-bold hover:bg-zinc-200 transition-all">
+                Get Link
               </button>
-            )}
+            </div>
           </div>
         ))}
       </div>
-
-      {/* Withdraw Modal */}
-      <AnimatePresence>
-        {showWithdraw && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowWithdraw(false)}
-              className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
-            >
-              <div className="p-8">
-                <h3 className="text-2xl font-bold text-zinc-900 mb-6">Withdraw Funds</h3>
-                <form onSubmit={handleWithdraw} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Amount (₦)</label>
-                    <input 
-                      required
-                      type="number"
-                      className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all"
-                      placeholder="0.00"
-                      max={walletData?.wallet?.balance}
-                      value={withdrawForm.amount}
-                      onChange={e => setWithdrawForm({...withdrawForm, amount: e.target.value})}
-                    />
-                    <p className="mt-1 text-[10px] text-zinc-400">Max: ₦{walletData?.wallet?.balance?.toLocaleString()}</p>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Bank Name</label>
-                    <input 
-                      required
-                      className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all"
-                      placeholder="e.g. GTBank, Zenith"
-                      value={withdrawForm.bank}
-                      onChange={e => setWithdrawForm({...withdrawForm, bank: e.target.value})}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Account Number</label>
-                    <input 
-                      required
-                      className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all"
-                      placeholder="10 digits"
-                      maxLength={10}
-                      value={withdrawForm.account}
-                      onChange={e => setWithdrawForm({...withdrawForm, account: e.target.value})}
-                    />
-                  </div>
-                  <div className="pt-4 flex gap-3">
-                    <button 
-                      type="button"
-                      onClick={() => setShowWithdraw(false)}
-                      className="flex-1 px-6 py-3 rounded-xl font-bold text-zinc-500 hover:bg-zinc-50 transition-all"
-                    >
-                      Cancel
-                    </button>
-                    <button 
-                      type="submit"
-                      className="flex-1 bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-emerald-700 transition-all"
-                    >
-                      Request Payout
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
     </div>
   );
 };
 
-const AnalyticsDashboard = () => {
+const AnalyticsDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: string, options?: RequestInit) => Promise<Response> }) => {
   const [data, setData] = useState<any>(null);
 
   useEffect(() => {
-    fetch("/api/analytics")
+    authenticatedFetch("/api/admin/stats")
       .then(res => res.json())
       .then(setData);
   }, []);
 
   if (!data) return <div className="p-12 text-center text-zinc-400">Loading analytics...</div>;
 
-  const COLORS = ['#10b981', '#064e3b', '#3b82f6', '#f59e0b'];
-
-  const pieData = [
-    { name: 'Sales', value: data.ratio.total_sales },
-    { name: 'Clicks', value: Math.max(0, data.ratio.total_clicks - data.ratio.total_sales) },
-  ];
-
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
       <div className="mb-12">
-        <h2 className="text-3xl font-bold text-zinc-900 tracking-tight">Ecosystem Analytics</h2>
+        <h2 className="text-3xl font-bold text-zinc-900 tracking-tight">Platform Analytics</h2>
         <p className="text-zinc-500">Real-time performance across the platform</p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-        {/* CTR Trends */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
         <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
-          <h3 className="font-bold text-zinc-900 mb-6 flex items-center gap-2">
-            <TrendingUp size={20} className="text-emerald-600" />
-            CTR Trends (Last 14 Days)
-          </h3>
-          <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={data.trends}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                <XAxis 
-                  dataKey="date" 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{ fontSize: 10, fill: '#71717a' }}
-                  tickFormatter={(str) => str.split('-').slice(1).join('/')}
-                />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#71717a' }} />
-                <Tooltip 
-                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                />
-                <Line type="monotone" dataKey="clicks" stroke="#10b981" strokeWidth={3} dot={false} name="Clicks" />
-                <Line type="monotone" dataKey="conversions" stroke="#064e3b" strokeWidth={3} dot={false} name="Sales" />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+          <div className="text-zinc-400 text-xs font-bold uppercase mb-2">Total Earnings</div>
+          <div className="text-3xl font-bold text-emerald-600">₦{data.totalEarnings?.toLocaleString() || "0"}</div>
         </div>
-
-        {/* Click vs Sale Ratio */}
-        <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm relative">
-          <h3 className="font-bold text-zinc-900 mb-6 flex items-center gap-2">
-            <CheckCircle size={20} className="text-emerald-600" />
-            Click vs Sale Ratio
-          </h3>
-          <div className="flex items-center justify-center h-[300px] relative">
-            <div className="w-full h-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={pieData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={80}
-                    paddingAngle={5}
-                    dataKey="value"
-                  >
-                    {pieData.map((_entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="absolute flex flex-col items-center">
-              <span className="text-2xl font-bold text-zinc-900">
-                {data.ratio.total_clicks > 0 
-                  ? ((data.ratio.total_sales / data.ratio.total_clicks) * 100).toFixed(1) 
-                  : 0}%
-              </span>
-              <span className="text-[10px] text-zinc-400 uppercase font-bold">Conversion</span>
-            </div>
-          </div>
-          <div className="flex justify-center gap-8 mt-4">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-emerald-500" />
-              <span className="text-xs text-zinc-500">Sales ({data.ratio.total_sales})</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-emerald-900" />
-              <span className="text-xs text-zinc-500">Other Clicks ({Math.max(0, data.ratio.total_clicks - data.ratio.total_sales)})</span>
-            </div>
-          </div>
+        <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
+          <div className="text-zinc-400 text-xs font-bold uppercase mb-2">Subscription Revenue</div>
+          <div className="text-3xl font-bold text-zinc-900">₦{data.subscriptionRevenue?.toLocaleString() || "0"}</div>
         </div>
-      </div>
-
-      {/* Influencer Ranking */}
-      <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
-        <h3 className="font-bold text-zinc-900 mb-6 flex items-center gap-2">
-          <Users size={20} className="text-emerald-600" />
-          Top Influencers
-        </h3>
-        <div className="overflow-hidden rounded-2xl border border-zinc-100">
-          <table className="w-full text-left">
-            <thead className="bg-zinc-50 border-b border-zinc-100">
-              <tr>
-                <th className="px-6 py-4 text-xs font-bold text-zinc-400 uppercase">Rank</th>
-                <th className="px-6 py-4 text-xs font-bold text-zinc-400 uppercase">Influencer</th>
-                <th className="px-6 py-4 text-xs font-bold text-zinc-400 uppercase text-right">Sales</th>
-                <th className="px-6 py-4 text-xs font-bold text-zinc-400 uppercase text-right">Total Earned</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-100">
-              {data.ranking.map((inf: any, i: number) => (
-                <tr key={i} className="hover:bg-zinc-50/50 transition-colors">
-                  <td className="px-6 py-4">
-                    <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                      i === 0 ? 'bg-amber-100 text-amber-700' : 
-                      i === 1 ? 'bg-zinc-200 text-zinc-700' : 
-                      i === 2 ? 'bg-orange-100 text-orange-700' : 'bg-zinc-50 text-zinc-400'
-                    }`}>
-                      {i + 1}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="font-bold text-zinc-900">{inf.name}</div>
-                    <div className="text-xs text-zinc-500">@{inf.handle}</div>
-                  </td>
-                  <td className="px-6 py-4 text-right font-bold text-zinc-900">{inf.conversions}</td>
-                  <td className="px-6 py-4 text-right font-bold text-emerald-600">₦{inf.total_earned.toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
+          <div className="text-zinc-400 text-xs font-bold uppercase mb-2">Commission Revenue</div>
+          <div className="text-3xl font-bold text-zinc-900">₦{data.commissionRevenue?.toLocaleString() || "0"}</div>
         </div>
       </div>
     </div>
   );
 };
 
-const AdminDashboard = () => {
+const AdminDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: string, options?: RequestInit) => Promise<Response> }) => {
   const [stats, setStats] = useState<any>(null);
   const [activeTab, setActiveTab] = useState("overview");
-  const [financeOpen, setFinanceOpen] = useState(true);
   const [showWithdraw, setShowWithdraw] = useState(false);
-  const [withdrawForm, setWithdrawForm] = useState({ amount: "", bank: "", account: "" });
-
-  const fetchStats = () => {
-    fetch("/api/admin/stats")
-      .then(res => res.json())
-      .then(setStats);
-  };
+  const [withdrawForm, setWithdrawForm] = useState({ amount: "", bankName: "", accountNumber: "" });
 
   useEffect(() => {
     fetchStats();
   }, []);
 
-  const handleWithdraw = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const res = await fetch("/api/admin/withdraw", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        amount: parseFloat(withdrawForm.amount),
-        bank_name: withdrawForm.bank,
-        account_number: withdrawForm.account
-      })
-    });
-
-    if (res.ok) {
-      setShowWithdraw(false);
-      setWithdrawForm({ amount: "", bank: "", account: "" });
-      fetchStats();
-    } else {
-      const err = await res.json();
-      alert(err.error || "Withdrawal failed");
+  const fetchStats = async () => {
+    try {
+      const res = await authenticatedFetch("/api/admin/stats");
+      const data = await res.json();
+      setStats(data);
+    } catch (err) {
+      console.error("Failed to fetch admin stats:", err);
     }
   };
 
-  const menuItems = [
-    { id: "overview", label: "Overview", icon: LayoutDashboard },
-    { id: "users", label: "Users", icon: Users },
-    { id: "campaigns", label: "Campaigns", icon: Megaphone },
-    { id: "conversions", label: "Conversions", icon: CheckCircle },
-    { id: "payouts", label: "Payouts", icon: CreditCard },
-  ];
+  const handleWithdraw = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await authenticatedFetch("/api/admin/withdraw", {
+        method: "POST",
+        body: JSON.stringify(withdrawForm)
+      });
+      if (res.ok) {
+        setShowWithdraw(false);
+        setWithdrawForm({ amount: "", bankName: "", accountNumber: "" });
+        fetchStats();
+      } else {
+        const error = await res.json();
+        alert("Withdrawal failed: " + (error.error || "Unknown error"));
+      }
+    } catch (err) {
+      console.error("Withdrawal error:", err);
+    }
+  };
 
-  const financeItems = [
-    { id: "subscriptions", label: "Brand Subscriptions", icon: Calendar },
-    { id: "fees", label: "Platform Fees (7%)", icon: Percent },
-    { id: "wallet", label: "Platform Wallet", icon: Wallet },
-    { id: "transactions", label: "Transactions", icon: History },
-  ];
-
-  const bottomItems = [
-    { id: "fraud", label: "Fraud Detection", icon: ShieldAlert },
-    { id: "support", label: "Support", icon: LifeBuoy },
-    { id: "settings", label: "Settings", icon: Settings },
-  ];
-
-  if (!stats) return <div className="p-12 text-center text-zinc-400">Loading admin stats...</div>;
+  if (!stats) return <div className="p-12 text-center text-zinc-400">Loading admin dashboard...</div>;
 
   return (
-    <div className="flex min-h-[calc(100vh-64px)] bg-zinc-50">
-      {/* Admin Sidebar */}
-      <aside className="w-72 bg-white border-r border-zinc-200 flex flex-col">
-        <div className="p-6 border-b border-zinc-100">
-          <div className="flex items-center gap-2 text-emerald-600 mb-1">
-            <ShieldCheck size={20} />
-            <span className="text-xs font-bold uppercase tracking-widest">Admin Control</span>
-          </div>
-          <h2 className="text-xl font-bold text-zinc-900">Dashboard</h2>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
+        <div>
+          <h2 className="text-3xl font-bold text-zinc-900 tracking-tight">Admin Control Panel</h2>
+          <p className="text-zinc-500">Manage platform operations and revenue</p>
         </div>
-
-        <div className="flex-1 overflow-y-auto p-4 space-y-1">
-          {menuItems.map((item) => (
+        <div className="flex bg-zinc-100 p-1 rounded-2xl">
+          {["overview", "wallet", "users"].map((tab) => (
             <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
-                activeTab === item.id 
-                  ? "bg-emerald-50 text-emerald-700 shadow-sm" 
-                  : "text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900"
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-6 py-2 rounded-xl text-sm font-bold transition-all capitalize ${
+                activeTab === tab ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-900"
               }`}
             >
-              <item.icon size={18} />
-              {item.label}
+              {tab}
             </button>
           ))}
+        </div>
+      </div>
 
-          <div className="pt-4 pb-2">
-            <button 
-              onClick={() => setFinanceOpen(!financeOpen)}
-              className="w-full flex items-center justify-between px-4 py-2 text-[10px] font-bold text-zinc-400 uppercase tracking-widest hover:text-zinc-900 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <Banknote size={14} />
-                Finance
+      {activeTab === "overview" && (
+        <div className="space-y-8">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div className="bg-zinc-900 text-white p-8 rounded-[40px] shadow-xl relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition-transform">
+                <Banknote size={80} />
               </div>
-              <ChevronDown size={14} className={`transition-transform ${financeOpen ? "" : "-rotate-90"}`} />
-            </button>
-            
-            {financeOpen && (
-              <div className="mt-1 space-y-1 ml-2 border-l-2 border-zinc-100">
-                {financeItems.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => setActiveTab(item.id)}
-                    className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-medium transition-all ${
-                      activeTab === item.id 
-                        ? "text-emerald-700 font-bold" 
-                        : "text-zinc-500 hover:text-zinc-900"
-                    }`}
-                  >
-                    <item.icon size={14} />
-                    {item.label}
-                  </button>
+              <div className="relative z-10">
+                <div className="text-white/40 text-xs font-bold uppercase mb-2 tracking-widest">Platform Balance</div>
+                <div className="text-4xl font-bold text-emerald-400 mb-4">₦{stats.balance?.toLocaleString() || "0"}</div>
+                <button 
+                  onClick={() => setShowWithdraw(true)}
+                  className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl text-xs font-bold transition-colors flex items-center gap-2"
+                >
+                  <ArrowUpRight size={14} /> Withdraw Funds
+                </button>
+              </div>
+            </div>
+            <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
+              <div className="text-zinc-400 text-xs font-bold uppercase mb-2 tracking-widest">Total Users</div>
+              <div className="text-3xl font-bold text-zinc-900 mb-1">{stats.totalUsers || 0}</div>
+              <div className="text-[10px] font-bold text-emerald-600 uppercase tracking-tighter flex items-center gap-1">
+                <TrendingUp size={10} /> +12% this month
+              </div>
+            </div>
+            <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
+              <div className="text-zinc-400 text-xs font-bold uppercase mb-2 tracking-widest">Active Campaigns</div>
+              <div className="text-3xl font-bold text-zinc-900 mb-1">{stats.totalCampaigns || 0}</div>
+              <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">Across 42 Brands</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
+              <h3 className="text-lg font-bold text-zinc-900 mb-6 flex items-center gap-2">
+                <TrendingUp size={20} className="text-emerald-600" /> Revenue Streams
+              </h3>
+              <div className="space-y-6">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
+                      <Calendar size={20} />
+                    </div>
+                    <div>
+                      <div className="font-bold text-zinc-900">Subscriptions</div>
+                      <div className="text-xs text-zinc-500">Monthly Brand Fees</div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-bold text-zinc-900">₦{stats.subscriptionRevenue?.toLocaleString() || "0"}</div>
+                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">70% of total</div>
+                  </div>
+                </div>
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
+                      <Percent size={20} />
+                    </div>
+                    <div>
+                      <div className="font-bold text-zinc-900">Commissions</div>
+                      <div className="text-xs text-zinc-500">7% Payout Fee</div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-bold text-zinc-900">₦{stats.commissionRevenue?.toLocaleString() || "0"}</div>
+                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">30% of total</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
+              <h3 className="text-lg font-bold text-zinc-900 mb-6 flex items-center gap-2">
+                <History size={20} className="text-zinc-400" /> Recent Activity
+              </h3>
+              <div className="space-y-4">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="flex items-center justify-between py-3 border-b border-zinc-50 last:border-0">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-zinc-100 rounded-full flex items-center justify-center text-[10px] font-bold">JD</div>
+                      <div>
+                        <div className="text-sm font-bold text-zinc-900">New Brand Signup</div>
+                        <div className="text-[10px] text-zinc-400 uppercase">2 hours ago</div>
+                      </div>
+                    </div>
+                    <ChevronRight size={16} className="text-zinc-300" />
+                  </div>
                 ))}
               </div>
-            )}
-          </div>
-
-          <div className="pt-4 space-y-1">
-            {bottomItems.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => setActiveTab(item.id)}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
-                  activeTab === item.id 
-                    ? "bg-emerald-50 text-emerald-700 shadow-sm" 
-                    : "text-zinc-500 hover:bg-zinc-50 hover:text-zinc-900"
-                }`}
-              >
-                <item.icon size={18} />
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="p-4 border-t border-zinc-100">
-          <div className="bg-zinc-900 rounded-2xl p-4 text-white">
-            <div className="text-[10px] font-bold text-zinc-500 uppercase mb-2">System Status</div>
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
-              <span className="text-xs font-medium">All systems operational</span>
             </div>
           </div>
         </div>
-      </aside>
+      )}
 
-      {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto">
-        <div className="max-w-6xl mx-auto p-8 lg:p-12">
-          {activeTab === "overview" && (
-            <div className="space-y-12">
-              <div className="flex justify-between items-end">
-                <div>
-                  <h2 className="text-3xl font-bold text-zinc-900 tracking-tight">Overview</h2>
-                  <p className="text-zinc-500">Platform health and revenue monitoring</p>
-                </div>
-                <div className="text-sm font-medium text-zinc-400 bg-white px-4 py-2 rounded-full border border-zinc-100">
-                  Last updated: Just now
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
-                  <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mb-4">
-                    <TrendingUp size={20} />
-                  </div>
-                  <div className="text-sm text-zinc-400 font-bold uppercase tracking-widest mb-1">Total Commissions</div>
-                  <div className="text-2xl font-bold text-zinc-900">₦{stats.total_commissions.toLocaleString()}</div>
-                  <div className="text-[10px] text-zinc-400 mt-1">7% cut from all confirmed sales</div>
-                </div>
-
-                <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
-                  <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center mb-4">
-                    <Wallet size={20} />
-                  </div>
-                  <div className="text-sm text-zinc-400 font-bold uppercase tracking-widest mb-1">Subscription Revenue</div>
-                  <div className="text-2xl font-bold text-zinc-900">₦{stats.total_subscription_revenue.toLocaleString()}</div>
-                  <div className="text-[10px] text-zinc-400 mt-1">Monthly fees from brands</div>
-                </div>
-
-                <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
-                  <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center mb-4">
-                    <Megaphone size={20} />
-                  </div>
-                  <div className="text-sm text-zinc-400 font-bold uppercase tracking-widest mb-1">Total Brands</div>
-                  <div className="text-2xl font-bold text-zinc-900">{stats.brandCount}</div>
-                  <div className="text-[10px] text-zinc-400 mt-1">{stats.activeSubscriptions} active subscriptions</div>
-                </div>
-
-                <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
-                  <div className="w-10 h-10 bg-purple-50 text-purple-600 rounded-2xl flex items-center justify-center mb-4">
-                    <Users size={20} />
-                  </div>
-                  <div className="text-sm text-zinc-400 font-bold uppercase tracking-widest mb-1">Total Influencers</div>
-                  <div className="text-2xl font-bold text-zinc-900">{stats.influencerCount}</div>
-                  <div className="text-[10px] text-zinc-400 mt-1">Active on the platform</div>
-                </div>
-              </div>
-
-              <div className="bg-zinc-900 text-white p-12 rounded-[50px] relative overflow-hidden">
-                <div className="relative z-10">
-                  <div className="flex justify-between items-start mb-4">
-                    <h3 className="text-3xl font-bold">Available Platform Balance</h3>
-                    <button 
-                      onClick={() => setShowWithdraw(true)}
-                      className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-3 rounded-2xl font-bold flex items-center gap-2 transition-all shadow-lg shadow-emerald-500/20"
-                    >
-                      <ArrowUpRight size={18} />
-                      Withdraw to Bank
-                    </button>
-                  </div>
-                  <div className="text-6xl font-bold text-emerald-400 mb-8">
-                    ₦{stats.balance?.toLocaleString() || "0"}
-                  </div>
-                  <div className="grid grid-cols-2 gap-8 max-w-md">
-                    <div>
-                      <div className="text-xs text-white/40 uppercase font-bold tracking-widest mb-2">Commission Share</div>
-                      <div className="w-full bg-white/10 h-2 rounded-full overflow-hidden">
-                        <div 
-                          className="bg-emerald-400 h-full" 
-                          style={{ width: `${(stats.total_commissions / (stats.total_commissions + stats.total_subscription_revenue || 1)) * 100}%` }} 
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-white/40 uppercase font-bold tracking-widest mb-2">Subscription Share</div>
-                      <div className="w-full bg-white/10 h-2 rounded-full overflow-hidden">
-                        <div 
-                          className="bg-blue-400 h-full" 
-                          style={{ width: `${(stats.total_subscription_revenue / (stats.total_commissions + stats.total_subscription_revenue || 1)) * 100}%` }} 
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="absolute top-0 right-0 w-1/2 h-full bg-gradient-to-l from-emerald-500/10 to-transparent" />
-              </div>
-            </div>
-          )}
-
-          {activeTab === "wallet" && (
-            <div className="space-y-8">
-              <div className="flex justify-between items-end">
-                <div>
-                  <h2 className="text-3xl font-bold text-zinc-900 tracking-tight">Platform Wallet</h2>
-                  <p className="text-zinc-500">Manage platform revenue and withdrawals</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
-                  <div className="text-sm text-zinc-400 font-bold uppercase tracking-widest mb-1">Available Balance</div>
-                  <div className="text-3xl font-bold text-zinc-900">₦{stats.balance?.toLocaleString() || "0"}</div>
-                </div>
-                <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
-                  <div className="text-sm text-zinc-400 font-bold uppercase tracking-widest mb-1">Total Commissions</div>
-                  <div className="text-3xl font-bold text-zinc-900">₦{stats.total_commissions.toLocaleString()}</div>
-                </div>
-                <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
-                  <div className="text-sm text-zinc-400 font-bold uppercase tracking-widest mb-1">Subscription Revenue</div>
-                  <div className="text-3xl font-bold text-zinc-900">₦{stats.total_subscription_revenue.toLocaleString()}</div>
-                </div>
-              </div>
-
-              <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
-                <h3 className="font-bold text-zinc-900 mb-6">Withdrawal History</h3>
-                <div className="overflow-hidden rounded-2xl border border-zinc-100">
-                  <table className="w-full text-left">
-                    <thead className="bg-zinc-50 border-b border-zinc-100">
-                      <tr>
-                        <th className="px-6 py-4 text-xs font-bold text-zinc-400 uppercase">Date</th>
-                        <th className="px-6 py-4 text-xs font-bold text-zinc-400 uppercase">Bank Details</th>
-                        <th className="px-6 py-4 text-xs font-bold text-zinc-400 uppercase text-right">Amount</th>
-                        <th className="px-6 py-4 text-xs font-bold text-zinc-400 uppercase text-center">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-100">
-                      {stats.withdrawals?.length > 0 ? (
-                        stats.withdrawals.map((w: any) => (
-                          <tr key={w.id} className="hover:bg-zinc-50/50 transition-colors">
-                            <td className="px-6 py-4 text-sm text-zinc-500">
-                              {new Date(w.created_at).toLocaleDateString()}
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="font-bold text-zinc-900">{w.bank_name}</div>
-                              <div className="text-xs text-zinc-500">{w.account_number}</div>
-                            </td>
-                            <td className="px-6 py-4 text-right font-bold text-zinc-900">
-                              ₦{w.amount.toLocaleString()}
-                            </td>
-                            <td className="px-6 py-4 text-center">
-                              <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-bold uppercase">
-                                {w.status}
-                              </span>
-                            </td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan={4} className="px-6 py-12 text-center text-zinc-400 italic">No withdrawals yet</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab !== "overview" && activeTab !== "wallet" && (
-            <div className="flex flex-col items-center justify-center py-24 text-center">
-              <div className="w-20 h-20 bg-zinc-100 text-zinc-400 rounded-3xl flex items-center justify-center mb-6">
-                <ShieldCheck size={40} />
-              </div>
-              <h3 className="text-2xl font-bold text-zinc-900 mb-2">{activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} Module</h3>
-              <p className="text-zinc-500 max-w-sm">This administrative module is currently being populated with real-time data from the NaijaTrack ecosystem.</p>
-            </div>
-          )}
+      {activeTab === "wallet" && (
+        <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm text-center py-24">
+          <Banknote size={48} className="mx-auto mb-4 text-zinc-200" />
+          <h3 className="text-xl font-bold text-zinc-900 mb-2">Wallet Management</h3>
+          <p className="text-zinc-500 max-w-sm mx-auto">Detailed transaction history and withdrawal management will be available here.</p>
         </div>
-      </main>
+      )}
 
-      {/* Admin Withdraw Modal */}
+      {activeTab === "users" && (
+        <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm text-center py-24">
+          <Users size={48} className="mx-auto mb-4 text-zinc-200" />
+          <h3 className="text-xl font-bold text-zinc-900 mb-2">User Management</h3>
+          <p className="text-zinc-500 max-w-sm mx-auto">Manage brands, influencers, and system administrators.</p>
+        </div>
+      )}
+
+      {/* Withdrawal Modal */}
       <AnimatePresence>
         {showWithdraw && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -1498,55 +1176,53 @@ const AdminDashboard = () => {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
+              className="relative bg-white w-full max-w-md rounded-[40px] shadow-2xl overflow-hidden"
             >
               <div className="p-8">
-                <div className="flex items-center gap-3 mb-6">
+                <div className="flex items-center gap-3 mb-8">
                   <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center">
                     <Banknote size={24} />
                   </div>
                   <div>
-                    <h3 className="text-2xl font-bold text-zinc-900">Platform Payout</h3>
-                    <p className="text-xs text-zinc-500">Withdraw revenue to corporate account</p>
+                    <h3 className="text-2xl font-bold text-zinc-900">Withdraw Funds</h3>
+                    <p className="text-xs text-zinc-500">Transfer earnings to your bank account</p>
                   </div>
                 </div>
-                
+
                 <form onSubmit={handleWithdraw} className="space-y-4">
                   <div>
-                    <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Withdrawal Amount (₦)</label>
+                    <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Amount (₦)</label>
                     <input 
                       required
                       type="number"
-                      className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all"
+                      className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:border-emerald-600 outline-none"
                       placeholder="0.00"
-                      max={stats.balance}
                       value={withdrawForm.amount}
                       onChange={e => setWithdrawForm({...withdrawForm, amount: e.target.value})}
                     />
-                    <p className="mt-1 text-[10px] text-zinc-400">Available: ₦{stats.balance?.toLocaleString()}</p>
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Bank Name</label>
                     <input 
                       required
-                      className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all"
-                      placeholder="e.g. Access Bank, Zenith"
-                      value={withdrawForm.bank}
-                      onChange={e => setWithdrawForm({...withdrawForm, bank: e.target.value})}
+                      className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:border-emerald-600 outline-none"
+                      placeholder="e.g. Zenith Bank"
+                      value={withdrawForm.bankName}
+                      onChange={e => setWithdrawForm({...withdrawForm, bankName: e.target.value})}
                     />
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Account Number</label>
                     <input 
                       required
-                      className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all"
-                      placeholder="10 digits"
+                      className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:border-emerald-600 outline-none"
+                      placeholder="10-digit number"
                       maxLength={10}
-                      value={withdrawForm.account}
-                      onChange={e => setWithdrawForm({...withdrawForm, account: e.target.value})}
+                      value={withdrawForm.accountNumber}
+                      onChange={e => setWithdrawForm({...withdrawForm, accountNumber: e.target.value})}
                     />
                   </div>
-                  <div className="pt-4 flex gap-3">
+                  <div className="pt-6 flex gap-3">
                     <button 
                       type="button"
                       onClick={() => setShowWithdraw(false)}
@@ -1556,9 +1232,9 @@ const AdminDashboard = () => {
                     </button>
                     <button 
                       type="submit"
-                      className="flex-1 bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-500/20"
+                      className="flex-1 bg-zinc-900 text-white px-6 py-3 rounded-xl font-bold hover:bg-zinc-800 transition-all shadow-lg"
                     >
-                      Confirm Payout
+                      Confirm
                     </button>
                   </div>
                 </form>
@@ -1659,7 +1335,153 @@ const SMEPortal = () => {
 
 export default function App() {
   const [activeView, setActiveView] = useState("landing");
+  const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<any[]>([]);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [influencers, setInfluencers] = useState<Influencer[]>([]);
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [selectedBrand, setSelectedBrand] = useState<Brand | null>(null);
+  const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
+  const [stats, setStats] = useState<CampaignStat[]>([]);
+  const [showCreate, setShowCreate] = useState(false);
+  const [showDeposit, setShowDeposit] = useState(false);
+  const [showAssign, setShowAssign] = useState(false);
+  const [depositAmount, setDepositAmount] = useState("");
+  const [newCampaign, setNewCampaign] = useState({
+    title: "",
+    description: "",
+    budget: 100000,
+    payout_per_lead: 1000,
+    wa_number: ""
+  });
+
+  // Firebase Auth Listener
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        const idToken = await firebaseUser.getIdToken();
+        setToken(idToken);
+        
+        // Fetch or create user profile in Firestore
+        const userRef = doc(db, "users", firebaseUser.uid);
+        const userSnap = await getDoc(userRef);
+        
+        if (userSnap.exists()) {
+          const userData = userSnap.data() as User;
+          setUser(userData);
+          
+          // Ensure associated profile exists
+          if (userData.role === "BRAND") {
+            const brandRef = doc(db, "brands", firebaseUser.uid);
+            const brandSnap = await getDoc(brandRef);
+            if (!brandSnap.exists()) {
+              await setDoc(brandRef, {
+                userId: firebaseUser.uid,
+                companyName: firebaseUser.displayName || "New Brand",
+                subscriptionStatus: "inactive",
+                balance: 0,
+                createdAt: serverTimestamp()
+              });
+            }
+          } else if (userData.role === "INFLUENCER") {
+            const influencerRef = doc(db, "influencers", firebaseUser.uid);
+            const influencerSnap = await getDoc(influencerRef);
+            if (!influencerSnap.exists()) {
+              await setDoc(influencerRef, {
+                userId: firebaseUser.uid,
+                followers: 0,
+                walletBalance: 0,
+                createdAt: serverTimestamp()
+              });
+            }
+          }
+        } else {
+          // New user - default to INFLUENCER
+          const newUser: User = {
+            id: firebaseUser.uid,
+            name: firebaseUser.displayName || "New User",
+            email: firebaseUser.email || "",
+            role: "INFLUENCER"
+          };
+          await setDoc(userRef, {
+            ...newUser,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          });
+          
+          // Create influencer profile
+          await setDoc(doc(db, "influencers", firebaseUser.uid), {
+            userId: firebaseUser.uid,
+            followers: 0,
+            walletBalance: 0,
+            createdAt: serverTimestamp()
+          });
+          
+          setUser(newUser);
+        }
+      } else {
+        setUser(null);
+        setToken(null);
+      }
+      setIsAuthReady(true);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogout = async () => {
+    await logout();
+    setActiveView("landing");
+  };
+
+  const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
+    const currentToken = await auth.currentUser?.getIdToken();
+    return fetch(url, {
+      ...options,
+      headers: {
+        ...options.headers,
+        Authorization: `Bearer ${currentToken}`,
+        "Content-Type": "application/json",
+      },
+    });
+  };
+
+  const fetchBrands = async () => {
+    const res = await authenticatedFetch("/api/brands");
+    const data = await res.json();
+    if (res.ok) {
+      setBrands(data);
+      if (data.length > 0 && !selectedBrand) {
+        setSelectedBrand(data[0]);
+      }
+    }
+  };
+
+  const fetchCampaigns = async () => {
+    const res = await authenticatedFetch("/api/campaigns");
+    const data = await res.json();
+    if (res.ok) {
+      setCampaigns(data);
+    }
+  };
+
+  const handleSubscribe = async () => {
+    const res = await authenticatedFetch("/api/brands/subscribe", { method: "POST" });
+    if (res.ok) {
+      fetchBrands();
+    }
+  };
+
+  const fetchStats = async (id: string) => {
+    const res = await authenticatedFetch(`/api/campaigns/${id}/stats`);
+    const data = await res.json();
+    if (res.ok) {
+      setStats(data);
+    }
+  };
 
   // WebSocket setup
   useEffect(() => {
@@ -1680,57 +1502,26 @@ export default function App() {
     return () => ws.close();
   }, []);
 
+  useEffect(() => {
+    if (token) {
+      fetchBrands();
+      fetchCampaigns();
+    }
+  }, [token]);
+
   const removeNotification = (id: string) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
   };
 
   // Initial data seeding for demo
   useEffect(() => {
-    const seedData = async () => {
-      // Check if we already have data
-      const res = await fetch("/api/influencers");
-      const influencers = await res.json();
-      if (influencers.length === 0) {
-        // Seed influencers
-        await fetch("/api/influencers", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: "Tunde Ednut", handle: "tundeednut", platform: "Instagram" })
-        });
-        await fetch("/api/influencers", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: "KieKie", handle: "kie_kie__", platform: "TikTok" })
-        });
-        
-        // Seed a brand and campaign
-        const bRes = await fetch("/api/brands", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: "Zaron Cosmetics", email: "info@zaron.com" })
-        });
-        const brand = await bRes.json();
-        
-        await fetch("/api/campaigns", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            brand_id: brand.id,
-            title: "March Glow Up",
-            description: "Promoting our new vitamin C serum. ₦1000 per confirmed sale.",
-            budget: 100000,
-            payout_per_lead: 1000,
-            wa_number: "2348012345678"
-          })
-        });
-      }
-    };
-    seedData();
+    // Removed demo seeding as we have a real backend
   }, []);
 
   return (
-    <div className="min-h-screen bg-zinc-50 font-sans text-zinc-900 selection:bg-emerald-100 selection:text-emerald-900">
-      <Navbar activeView={activeView} setActiveView={setActiveView} />
+    <ErrorBoundary>
+      <div className="min-h-screen bg-zinc-50 font-sans text-zinc-900 selection:bg-emerald-100 selection:text-emerald-900">
+      <Navbar activeView={activeView} setActiveView={setActiveView} user={user} onLogout={handleLogout} />
       
       {/* Toast Notifications */}
       <div className="fixed bottom-8 right-8 z-[200] flex flex-col gap-4 pointer-events-none">
@@ -1769,32 +1560,38 @@ export default function App() {
         <AnimatePresence mode="wait">
           {activeView === "landing" && (
             <motion.div key="landing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <LandingPage onStart={setActiveView} />
+              <LandingPage onStart={() => setActiveView(user ? "analytics" : "auth")} />
             </motion.div>
           )}
-          {activeView === "brand" && (
+          {activeView === "auth" && !user && (
+            <motion.div key="auth" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <Auth />
+            </motion.div>
+          )}
+          {activeView === "brand" && user && (user.role === "BRAND" || user.role === "ADMIN") && (
             <motion.div key="brand" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <BrandDashboard />
+              <BrandDashboard authenticatedFetch={authenticatedFetch} />
             </motion.div>
           )}
-          {activeView === "influencer" && (
+          {activeView === "influencer" && user && (user.role === "INFLUENCER" || user.role === "ADMIN") && (
             <motion.div key="influencer" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <InfluencerDashboard />
+              <InfluencerDashboard authenticatedFetch={authenticatedFetch} />
             </motion.div>
           )}
-          {activeView === "sme" && (
-            <motion.div key="sme" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <SMEPortal />
-            </motion.div>
-          )}
-          {activeView === "analytics" && (
+          {activeView === "analytics" && user && (
             <motion.div key="analytics" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <AnalyticsDashboard />
+              <AnalyticsDashboard authenticatedFetch={authenticatedFetch} />
             </motion.div>
           )}
-          {activeView === "admin" && (
+          {activeView === "admin" && user && user.role === "ADMIN" && (
             <motion.div key="admin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full">
-              <AdminDashboard />
+              <AdminDashboard authenticatedFetch={authenticatedFetch} />
+            </motion.div>
+          )}
+          {/* Fallback for unauthorized or unauthenticated */}
+          {activeView !== "landing" && activeView !== "auth" && !user && isAuthReady && (
+            <motion.div key="unauth" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <Auth />
             </motion.div>
           )}
         </AnimatePresence>
@@ -1822,5 +1619,6 @@ export default function App() {
         </div>
       </footer>
     </div>
+    </ErrorBoundary>
   );
 }
