@@ -93,6 +93,57 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
 
 // --- Types ---
 
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
 interface Campaign {
   id: string;
   brand_id: string;
@@ -343,7 +394,9 @@ const Navbar = ({ activeView, setActiveView, user, onLogout }: { activeView: str
             <div className="flex items-center gap-4">
               <div className="text-right hidden md:block">
                 <div className="text-sm font-bold text-zinc-900">{user.name}</div>
-                <div className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">{user.role}</div>
+                <div className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">
+                  {user.role === 'BRAND' ? 'Brand' : user.role === 'INFLUENCER' ? 'Influencer' : 'Admin'}
+                </div>
               </div>
               <button
                 onClick={onLogout}
@@ -1704,14 +1757,7 @@ export default function App() {
           try {
             userSnap = await getDoc(userRef);
           } catch (err) {
-            console.error("Error fetching user profile:", err);
-            setUser({
-              id: firebaseUser.uid,
-              name: firebaseUser.displayName || "User",
-              email: firebaseUser.email || "",
-              role: intendedRole || "INFLUENCER" // Use intended role if available
-            });
-            setIsAuthReady(true);
+            handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`);
             return;
           }
           
@@ -1723,26 +1769,49 @@ export default function App() {
             try {
               if (userData.role === "BRAND") {
                 const brandRef = doc(db, "brands", firebaseUser.uid);
-                const brandSnap = await getDoc(brandRef);
+                let brandSnap;
+                try {
+                  brandSnap = await getDoc(brandRef);
+                } catch (err) {
+                  handleFirestoreError(err, OperationType.GET, `brands/${firebaseUser.uid}`);
+                  return;
+                }
+                
                 if (!brandSnap.exists()) {
-                  await setDoc(brandRef, {
-                    userId: firebaseUser.uid,
-                    companyName: firebaseUser.displayName || "New Brand",
-                    subscriptionStatus: "inactive",
-                    balance: 0,
-                    createdAt: serverTimestamp()
-                  });
+                  try {
+                    await setDoc(brandRef, {
+                      userId: firebaseUser.uid,
+                      companyName: firebaseUser.displayName || "New Brand",
+                      subscriptionStatus: "inactive",
+                      balance: 0,
+                      createdAt: serverTimestamp()
+                    });
+                  } catch (err) {
+                    handleFirestoreError(err, OperationType.WRITE, `brands/${firebaseUser.uid}`);
+                  }
                 }
               } else if (userData.role === "INFLUENCER") {
                 const influencerRef = doc(db, "influencers", firebaseUser.uid);
-                const influencerSnap = await getDoc(influencerRef);
+                let influencerSnap;
+                try {
+                  influencerSnap = await getDoc(influencerRef);
+                } catch (err) {
+                  handleFirestoreError(err, OperationType.GET, `influencers/${firebaseUser.uid}`);
+                  return;
+                }
+                
                 if (!influencerSnap.exists()) {
-                  await setDoc(influencerRef, {
-                    userId: firebaseUser.uid,
-                    followers: 0,
-                    walletBalance: 0,
-                    createdAt: serverTimestamp()
-                  });
+                  try {
+                    await setDoc(influencerRef, {
+                      userId: firebaseUser.uid,
+                      niche: null,
+                      followers: 0,
+                      walletBalance: 0,
+                      createdAt: serverTimestamp()
+                    });
+                  } catch (err) {
+                    handleFirestoreError(err, OperationType.WRITE, `influencers/${firebaseUser.uid}`);
+                  }
                 }
               }
             } catch (profileErr) {
@@ -1775,13 +1844,14 @@ export default function App() {
               } else {
                 await setDoc(doc(db, "influencers", firebaseUser.uid), {
                   userId: firebaseUser.uid,
+                  niche: null,
                   followers: 0,
                   walletBalance: 0,
                   createdAt: serverTimestamp()
                 });
               }
             } catch (createErr) {
-              console.error("Error creating new user profile:", createErr);
+              handleFirestoreError(createErr, OperationType.WRITE, `users/${firebaseUser.uid} (and associated)`);
             }
             
             setUser(newUser);

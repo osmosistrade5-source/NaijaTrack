@@ -58,9 +58,11 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isAuthenticated() &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN' ||
-          (request.auth.token.email == "osmosistrade5@gmail.com" && request.auth.token.email_verified == true));
+      return isAuthenticated() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'ADMIN') ||
+        (request.auth.token.email == "osmosistrade5@gmail.com" && request.auth.token.email_verified == true)
+      );
     }
 
     function isValidEmail(email) {
@@ -97,8 +99,8 @@ service cloud.firestore {
     function isValidInfluencer(data) {
       return hasOnlyAllowedFields(['userId', 'niche', 'followers', 'walletBalance', 'createdAt']) &&
              data.userId is string &&
-             (data.niche == null || (data.niche is string && data.niche.size() <= 100)) &&
-             data.followers is int && data.followers >= 0 &&
+             (!('niche' in data) || data.niche == null || (data.niche is string && data.niche.size() <= 100)) &&
+             data.followers is number && data.followers >= 0 &&
              data.walletBalance is number && data.walletBalance >= 0 &&
              data.createdAt is timestamp;
     }
