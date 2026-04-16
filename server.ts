@@ -26,8 +26,8 @@ async function startServer() {
   // Seed Admin Wallet in Firestore
   const seedAdmin = async () => {
     try {
-      const adminDb = getAdminDb();
-      const adminWalletRef = adminDb.collection("admin_wallets").doc("main");
+      const dbInstance = getAdminDb();
+      const adminWalletRef = dbInstance.collection("admin_wallets").doc("main");
       const doc = await adminWalletRef.get();
       if (!doc.exists) {
         await adminWalletRef.set({
@@ -38,7 +38,7 @@ async function startServer() {
         });
         console.log("Admin wallet seeded in Firestore");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to seed admin wallet:", error);
     }
   };

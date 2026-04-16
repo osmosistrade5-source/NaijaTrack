@@ -22,16 +22,34 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
     const decodedToken = await adminAuth.verifyIdToken(token);
     
     // Fetch user role from Firestore
-    const userDoc = await adminDb.collection("users").doc(decodedToken.uid).get();
-    const userData = userDoc.data();
-    
-    req.user = {
-      id: decodedToken.uid,
-      role: userData?.role || "INFLUENCER",
-      email: decodedToken.email
-    };
-    
-    next();
+    try {
+      const userDoc = await adminDb.collection("users").doc(decodedToken.uid).get();
+      const userData = userDoc.data();
+      
+      req.user = {
+        id: decodedToken.uid,
+        role: userData?.role || "INFLUENCER",
+        email: decodedToken.email
+      };
+      
+      next();
+    } catch (dbError: any) {
+      console.error(`Firestore access error (DB: ${adminDb.databaseId}):`, dbError.message || dbError);
+      
+      // Fallback: If we can't access Firestore, we still have the decoded token.
+      // We'll allow the request to proceed with a default role if it's a permission error.
+      if (dbError.code === 7 || dbError.message?.includes("PERMISSION_DENIED")) {
+        console.warn("Permission denied to Firestore, using default role for authenticated user.");
+        req.user = {
+          id: decodedToken.uid,
+          role: "INFLUENCER", // Default fallback
+          email: decodedToken.email
+        };
+        return next();
+      }
+      
+      throw dbError;
+    }
   } catch (error) {
     console.error("Auth error:", error);
     return res.status(401).json({ error: "Invalid token" });

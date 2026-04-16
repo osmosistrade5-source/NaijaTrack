@@ -137,13 +137,15 @@ const Auth = () => {
   const [loading, setLoading] = useState(false);
 
   const handleGoogleLogin = async () => {
+    console.log("Starting Google Login...");
     setLoading(true);
     setError("");
     try {
-      await loginWithGoogle();
+      const result = await loginWithGoogle();
+      console.log("Login successful:", result.user.email);
     } catch (err: any) {
-      console.error("Login error:", err);
-      setError(err.message || "Authentication failed");
+      console.error("Login error details:", err);
+      setError(`${err.code || "Error"}: ${err.message || "Authentication failed"}`);
     } finally {
       setLoading(false);
     }
@@ -1361,72 +1363,101 @@ export default function App() {
   // Firebase Auth Listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        const idToken = await firebaseUser.getIdToken();
-        setToken(idToken);
-        
-        // Fetch or create user profile in Firestore
-        const userRef = doc(db, "users", firebaseUser.uid);
-        const userSnap = await getDoc(userRef);
-        
-        if (userSnap.exists()) {
-          const userData = userSnap.data() as User;
-          setUser(userData);
+      try {
+        if (firebaseUser) {
+          const idToken = await firebaseUser.getIdToken();
+          setToken(idToken);
           
-          // Ensure associated profile exists
-          if (userData.role === "BRAND") {
-            const brandRef = doc(db, "brands", firebaseUser.uid);
-            const brandSnap = await getDoc(brandRef);
-            if (!brandSnap.exists()) {
-              await setDoc(brandRef, {
-                userId: firebaseUser.uid,
-                companyName: firebaseUser.displayName || "New Brand",
-                subscriptionStatus: "inactive",
-                balance: 0,
-                createdAt: serverTimestamp()
-              });
+          // Fetch or create user profile in Firestore
+          const userRef = doc(db, "users", firebaseUser.uid);
+          let userSnap;
+          try {
+            userSnap = await getDoc(userRef);
+          } catch (err) {
+            console.error("Error fetching user profile:", err);
+            // If we can't fetch the profile, we might still want to set the user locally
+            // but with a temporary role or just the basic info
+            setUser({
+              id: firebaseUser.uid,
+              name: firebaseUser.displayName || "User",
+              email: firebaseUser.email || "",
+              role: "INFLUENCER" // Default fallback
+            });
+            setIsAuthReady(true);
+            return;
+          }
+          
+          if (userSnap.exists()) {
+            const userData = userSnap.data() as User;
+            setUser(userData);
+            
+            // Ensure associated profile exists
+            try {
+              if (userData.role === "BRAND") {
+                const brandRef = doc(db, "brands", firebaseUser.uid);
+                const brandSnap = await getDoc(brandRef);
+                if (!brandSnap.exists()) {
+                  await setDoc(brandRef, {
+                    userId: firebaseUser.uid,
+                    companyName: firebaseUser.displayName || "New Brand",
+                    subscriptionStatus: "inactive",
+                    balance: 0,
+                    createdAt: serverTimestamp()
+                  });
+                }
+              } else if (userData.role === "INFLUENCER") {
+                const influencerRef = doc(db, "influencers", firebaseUser.uid);
+                const influencerSnap = await getDoc(influencerRef);
+                if (!influencerSnap.exists()) {
+                  await setDoc(influencerRef, {
+                    userId: firebaseUser.uid,
+                    followers: 0,
+                    walletBalance: 0,
+                    createdAt: serverTimestamp()
+                  });
+                }
+              }
+            } catch (profileErr) {
+              console.error("Error ensuring associated profile:", profileErr);
             }
-          } else if (userData.role === "INFLUENCER") {
-            const influencerRef = doc(db, "influencers", firebaseUser.uid);
-            const influencerSnap = await getDoc(influencerRef);
-            if (!influencerSnap.exists()) {
-              await setDoc(influencerRef, {
+          } else {
+            // New user - default to INFLUENCER
+            const newUser: User = {
+              id: firebaseUser.uid,
+              name: firebaseUser.displayName || "New User",
+              email: firebaseUser.email || "",
+              role: "INFLUENCER"
+            };
+            
+            try {
+              await setDoc(userRef, {
+                ...newUser,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp()
+              });
+              
+              // Create influencer profile
+              await setDoc(doc(db, "influencers", firebaseUser.uid), {
                 userId: firebaseUser.uid,
                 followers: 0,
                 walletBalance: 0,
                 createdAt: serverTimestamp()
               });
+            } catch (createErr) {
+              console.error("Error creating new user profile:", createErr);
             }
+            
+            setUser(newUser);
           }
         } else {
-          // New user - default to INFLUENCER
-          const newUser: User = {
-            id: firebaseUser.uid,
-            name: firebaseUser.displayName || "New User",
-            email: firebaseUser.email || "",
-            role: "INFLUENCER"
-          };
-          await setDoc(userRef, {
-            ...newUser,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          });
-          
-          // Create influencer profile
-          await setDoc(doc(db, "influencers", firebaseUser.uid), {
-            userId: firebaseUser.uid,
-            followers: 0,
-            walletBalance: 0,
-            createdAt: serverTimestamp()
-          });
-          
-          setUser(newUser);
+          setUser(null);
+          setToken(null);
         }
-      } else {
-        setUser(null);
-        setToken(null);
+      } catch (globalAuthErr) {
+        console.error("Global auth state error:", globalAuthErr);
+      } finally {
+        setIsAuthReady(true);
       }
-      setIsAuthReady(true);
     });
 
     return () => unsubscribe();

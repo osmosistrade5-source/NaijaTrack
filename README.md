@@ -8,6 +8,16 @@ Production-ready backend for NaijaTrack, connecting brands with influencers for 
 - **Auth:** JWT + Role-Based Authentication
 - **Payments:** Paystack
 
+## Firebase Authentication Setup
+
+To enable Google Login, you must authorize the application domains in the Firebase Console:
+
+1. Go to the [Firebase Console Authentication Settings](https://console.firebase.google.com/project/gen-lang-client-0759694858/authentication/settings).
+2. Go to **Settings** > **Authorized domains**.
+3. Add the following domains:
+   - `ais-dev-emeoxdkkoyqo3jzlncqypk-535860720928.europe-west2.run.app`
+   - `ais-pre-emeoxdkkoyqo3jzlncqypk-535860720928.europe-west2.run.app`
+
 ## Getting Started
 
 ### Prerequisites

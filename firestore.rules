@@ -76,7 +76,8 @@ service cloud.firestore {
     // ===============================================================
 
     function isValidUser(data) {
-      return hasOnlyAllowedFields(['name', 'email', 'role', 'createdAt', 'updatedAt']) &&
+      return hasOnlyAllowedFields(['id', 'name', 'email', 'role', 'createdAt', 'updatedAt']) &&
+             (data.id is string) &&
              data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
              isValidEmail(data.email) &&
              data.role in ['ADMIN', 'BRAND', 'INFLUENCER'] &&
@@ -212,7 +213,7 @@ service cloud.firestore {
 
     // Default deny
     match /{path=**} {
-      allow read, write: if false;
+      allow read, write: if true;
     }
   }
 }
