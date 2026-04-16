@@ -5,6 +5,7 @@ import { fundWallet, paystackWebhook, payoutInfluencer } from "../controllers/pa
 import { getAdminStats, getAllUsers, getAllTransactions } from "../controllers/admin";
 import { getBrandWallet, subscribeBrand, getBrands } from "../controllers/brand";
 import { getInfluencerWallet, getInfluencers } from "../controllers/influencer";
+import { createLink, getInfluencerLinks, getCampaignStats, confirmConversion } from "../controllers/link";
 import { authenticate, authorize } from "../middleware/auth";
 
 const router = Router();
@@ -20,10 +21,16 @@ router.post("/brands/subscribe", authenticate, authorize(["BRAND"]), subscribeBr
 // Influencer routes
 router.get("/influencers", authenticate, getInfluencers);
 router.get("/influencers/wallet", authenticate, authorize(["INFLUENCER"]), getInfluencerWallet);
+router.get("/influencers/links", authenticate, authorize(["INFLUENCER"]), getInfluencerLinks);
 
 // Campaign routes
 router.post("/campaigns", authenticate, authorize(["BRAND"]), createCampaign);
 router.get("/campaigns", authenticate, getCampaigns);
+router.get("/campaigns/:id/stats", authenticate, getCampaignStats);
+
+// Link routes
+router.post("/links", authenticate, authorize(["INFLUENCER"]), createLink);
+router.post("/links/:shortCode/convert", authenticate, authorize(["BRAND"]), confirmConversion);
 
 // Payment routes
 router.post("/payments/fund", authenticate, fundWallet);

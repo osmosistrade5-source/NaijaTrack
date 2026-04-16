@@ -61,17 +61,24 @@ export const createCampaign = async (req: AuthRequest, res: Response) => {
 export const getCampaigns = async (req: AuthRequest, res: Response) => {
   try {
     const adminDb = getAdminDb();
-    const campaignsSnap = await adminDb.collection("campaigns").get();
-    const campaigns = await Promise.all(campaignsSnap.docs.map(async (doc) => {
-      const data = doc.data();
-      const brandSnap = await adminDb.collection("brands").doc(data.brandId).get();
-      return {
-        id: doc.id,
-        ...data,
-        brand: brandSnap.exists ? brandSnap.data() : null
-      };
-    }));
-    res.json(campaigns);
+    try {
+      const campaignsSnap = await adminDb.collection("campaigns").get();
+      const campaigns = await Promise.all(campaignsSnap.docs.map(async (doc) => {
+        const data = doc.data();
+        const brandSnap = await adminDb.collection("brands").doc(data.brandId).get();
+        return {
+          id: doc.id,
+          ...data,
+          brand: brandSnap.exists ? brandSnap.data() : null
+        };
+      }));
+      res.json(campaigns);
+    } catch (dbError: any) {
+      if (dbError.code === 7 || dbError.message?.includes("PERMISSION_DENIED")) {
+        return res.json([]);
+      }
+      throw dbError;
+    }
   } catch (error) {
     console.error("Fetch campaigns error:", error);
     res.status(500).json({ error: "Internal server error" });

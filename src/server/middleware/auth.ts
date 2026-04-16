@@ -34,12 +34,12 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
       
       next();
     } catch (dbError: any) {
-      console.error(`Firestore access error (DB: ${adminDb.databaseId}):`, dbError.message || dbError);
+      const isPermissionError = dbError.code === 7 || 
+                               dbError.message?.includes("PERMISSION_DENIED") ||
+                               dbError.message?.includes("Missing or insufficient permissions");
       
-      // Fallback: If we can't access Firestore, we still have the decoded token.
-      // We'll allow the request to proceed with a default role if it's a permission error.
-      if (dbError.code === 7 || dbError.message?.includes("PERMISSION_DENIED")) {
-        console.warn("Permission denied to Firestore, using default role for authenticated user.");
+      if (isPermissionError) {
+        console.warn(`Permission denied to Firestore (DB: ${adminDb.databaseId}), using default role for authenticated user.`);
         req.user = {
           id: decodedToken.uid,
           role: "INFLUENCER", // Default fallback
@@ -48,6 +48,7 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
         return next();
       }
       
+      console.error(`Firestore access error (DB: ${adminDb.databaseId}):`, dbError.message || dbError);
       throw dbError;
     }
   } catch (error) {

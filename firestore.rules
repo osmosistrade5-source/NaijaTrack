@@ -213,7 +213,7 @@ service cloud.firestore {
 
     // Default deny
     match /{path=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }

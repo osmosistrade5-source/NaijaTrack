@@ -7,8 +7,10 @@ let app: admin.app.App | null = null;
 function getApp() {
   if (!app) {
     if (!admin.apps.length) {
-      app = admin.initializeApp();
-      console.log("Firebase Admin initialized with default settings");
+      app = admin.initializeApp({
+        projectId: firebaseConfig.projectId
+      });
+      console.log(`Firebase Admin initialized for project: ${firebaseConfig.projectId}`);
     } else {
       app = admin.apps[0]!;
     }

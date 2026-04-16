@@ -38,9 +38,9 @@ import {
   LogOut
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { auth, loginWithGoogle, logout, db } from "./lib/firebase";
-import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, setDoc, onSnapshot, collection, serverTimestamp } from "firebase/firestore";
+import { auth, loginWithGoogle, logout, db, registerWithEmail, loginWithEmail } from "./lib/firebase";
+import { onAuthStateChanged, updateProfile } from "firebase/auth";
+import { doc, getDoc, setDoc, onSnapshot, collection, serverTimestamp, query, where, getDocs } from "firebase/firestore";
 
 // --- Error Boundary ---
 interface ErrorBoundaryProps {
@@ -132,9 +132,13 @@ interface Brand {
   balance: number;
 }
 
-const Auth = () => {
+const Auth = ({ intendedRole, onAuthSuccess }: { intendedRole: 'BRAND' | 'INFLUENCER' | null, onAuthSuccess: () => void }) => {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState<'login' | 'signup'>('signup');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
 
   const handleGoogleLogin = async () => {
     console.log("Starting Google Login...");
@@ -143,6 +147,7 @@ const Auth = () => {
     try {
       const result = await loginWithGoogle();
       console.log("Login successful:", result.user.email);
+      onAuthSuccess();
     } catch (err: any) {
       console.error("Login error details:", err);
       setError(`${err.code || "Error"}: ${err.message || "Authentication failed"}`);
@@ -151,35 +156,154 @@ const Auth = () => {
     }
   };
 
+  const handleEmailAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    const trimmedEmail = email.trim();
+    try {
+      if (mode === 'signup') {
+        const result = await registerWithEmail(trimmedEmail, password);
+        if (result.user) {
+          await updateProfile(result.user, { displayName: name });
+        }
+      } else {
+        await loginWithEmail(trimmedEmail, password);
+      }
+      onAuthSuccess();
+    } catch (err: any) {
+      console.error("Email auth error:", err);
+      const errorCode = err.code;
+      if (errorCode === 'auth/operation-not-allowed') {
+        setError("Email/Password sign-in is not enabled. Please go to Firebase Console > Authentication > Sign-in method and enable 'Email/Password'.");
+      } else if (errorCode === 'auth/email-already-in-use') {
+        setError("This email is already registered. Try signing in instead.");
+      } else if (errorCode === 'auth/weak-password') {
+        setError("Password is too weak. Please use at least 6 characters.");
+      } else if (errorCode === 'auth/invalid-email') {
+        setError("Please enter a valid email address.");
+      } else if (errorCode === 'auth/user-not-found' || errorCode === 'auth/wrong-password' || errorCode === 'auth/invalid-credential') {
+        // Check if user exists in Firestore but maybe not in Auth
+        try {
+          const usersRef = collection(db, "users");
+          const q = query(usersRef, where("email", "==", trimmedEmail));
+          const querySnapshot = await getDocs(q);
+          if (!querySnapshot.empty) {
+            setError("Invalid password. If you signed up with Google, please use the Google button. If you haven't set a password yet, you might need to Sign Up first.");
+          } else {
+            setError("Invalid email or password. This email doesn't seem to be registered. Please check for typos or Sign Up.");
+          }
+        } catch (fsErr) {
+          console.error("Error checking Firestore for user:", fsErr);
+          setError("Invalid email or password. If you signed up with Google, please use the Google button.");
+        }
+      } else {
+        setError(`${errorCode || "Error"}: ${err.message || "Authentication failed."}`);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-zinc-50 px-4">
-      <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 border border-zinc-200">
-        <div className="text-center mb-8">
-          <div className="w-12 h-12 bg-emerald-600 rounded-xl flex items-center justify-center text-white font-bold text-2xl mx-auto mb-4">N</div>
-          <h2 className="text-2xl font-bold text-zinc-900">Welcome to NaijaTrack</h2>
-          <p className="text-zinc-500 mt-2">Influencer & Brand Platform for Nigeria</p>
+    <div className="min-h-screen flex items-center justify-center bg-zinc-50 px-4 py-12">
+      <div className="max-w-md w-full bg-white rounded-[40px] shadow-2xl p-10 border border-zinc-100">
+        <div className="text-center mb-10">
+          <div className="w-16 h-16 bg-emerald-600 rounded-3xl flex items-center justify-center text-white font-bold text-3xl mx-auto mb-6 shadow-lg shadow-emerald-200">N</div>
+          <h2 className="text-3xl font-bold text-zinc-900 tracking-tight">
+            {mode === 'signup' 
+              ? (intendedRole ? `Join as a ${intendedRole === 'BRAND' ? 'Brand' : 'Influencer'}` : 'Join NaijaTrack')
+              : 'Welcome Back'}
+          </h2>
+          <p className="text-zinc-500 mt-3 text-sm">
+            {mode === 'signup' 
+              ? (intendedRole 
+                  ? `Start tracking your ${intendedRole === 'BRAND' ? 'campaigns' : 'earnings'} today.` 
+                  : 'Start your performance marketing journey today.')
+              : 'Sign in to manage your account.'}
+          </p>
         </div>
 
-        <div className="space-y-4">
+        <div className="space-y-6">
           <button
             onClick={handleGoogleLogin}
             disabled={loading}
-            className="w-full flex items-center justify-center gap-3 bg-white border border-zinc-300 text-zinc-700 py-3 rounded-xl font-semibold hover:bg-zinc-50 transition-colors shadow-sm disabled:opacity-50"
+            className="w-full flex items-center justify-center gap-3 bg-white border border-zinc-200 text-zinc-700 py-4 rounded-2xl font-bold hover:bg-zinc-50 transition-all shadow-sm disabled:opacity-50"
           >
-            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
+            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-6 h-6" />
             {loading ? "Connecting..." : "Continue with Google"}
           </button>
 
+          <div className="relative flex items-center py-2">
+            <div className="flex-grow border-t border-zinc-100"></div>
+            <span className="flex-shrink mx-4 text-zinc-400 text-[10px] font-bold uppercase tracking-widest">or use email</span>
+            <div className="flex-grow border-t border-zinc-100"></div>
+          </div>
+
+          <form onSubmit={handleEmailAuth} className="space-y-4">
+            {mode === 'signup' && (
+              <div>
+                <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2 ml-1">Full Name</label>
+                <input 
+                  required
+                  type="text"
+                  placeholder="John Doe"
+                  className="w-full px-5 py-4 rounded-2xl border border-zinc-100 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                />
+              </div>
+            )}
+            <div>
+              <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2 ml-1">Email Address</label>
+              <input 
+                required
+                type="email"
+                placeholder="name@company.com"
+                className="w-full px-5 py-4 rounded-2xl border border-zinc-100 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2 ml-1">Password</label>
+              <input 
+                required
+                type="password"
+                placeholder="••••••••"
+                className="w-full px-5 py-4 rounded-2xl border border-zinc-100 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-zinc-900 text-white py-4 rounded-2xl font-bold hover:bg-zinc-800 transition-all shadow-xl shadow-zinc-200 disabled:opacity-50"
+            >
+              {loading ? "Processing..." : (mode === 'signup' ? "Create Account" : "Sign In")}
+            </button>
+          </form>
+
           {error && (
-            <div className="p-4 bg-red-50 text-red-600 rounded-xl text-sm font-medium">
+            <div className="p-4 bg-red-50 text-red-600 rounded-2xl text-xs font-medium border border-red-100">
               {error}
             </div>
           )}
+
+          <div className="text-center">
+            <button 
+              onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}
+              className="text-sm font-bold text-emerald-600 hover:text-emerald-700 transition-colors"
+            >
+              {mode === 'login' ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
+            </button>
+          </div>
         </div>
 
-        <div className="mt-8 pt-8 border-t border-zinc-100 text-center">
-          <p className="text-xs text-zinc-400 leading-relaxed">
-            By continuing, you agree to NaijaTrack's Terms of Service and Privacy Policy.
+        <div className="mt-10 pt-8 border-t border-zinc-100 text-center">
+          <p className="text-[10px] text-zinc-400 leading-relaxed uppercase tracking-tight">
+            Secure authentication powered by Firebase
           </p>
         </div>
       </div>
@@ -197,9 +321,10 @@ const Navbar = ({ activeView, setActiveView, user, onLogout }: { activeView: str
         </div>
         <div className="hidden sm:flex gap-8">
           {[
-            { id: "brand", label: "Brands", icon: Megaphone, roles: ["ADMIN", "BRAND"] },
-            { id: "influencer", label: "Influencers", icon: Users, roles: ["ADMIN", "INFLUENCER"] },
+            { id: "brand", label: "Brand Dashboard", icon: Megaphone, roles: ["ADMIN", "BRAND"] },
+            { id: "influencer", label: "Influencer Portal", icon: Users, roles: ["ADMIN", "INFLUENCER"] },
             { id: "analytics", label: "Analytics", icon: TrendingUp, roles: ["ADMIN", "BRAND", "INFLUENCER"] },
+            { id: "admin", label: "Admin", icon: ShieldCheck, roles: ["ADMIN"] },
           ].filter(item => !user || item.roles.includes(user.role)).map((item) => (
             <button
               key={item.id}
@@ -241,7 +366,7 @@ const Navbar = ({ activeView, setActiveView, user, onLogout }: { activeView: str
   </nav>
 );
 
-const LandingPage = ({ onStart }: { onStart: (view: string) => void }) => (
+const LandingPage = ({ onStart }: { onStart: (view: string, role?: 'BRAND' | 'INFLUENCER') => void }) => (
   <div className="bg-white">
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
       <div className="text-center max-w-3xl mx-auto">
@@ -261,13 +386,13 @@ const LandingPage = ({ onStart }: { onStart: (view: string) => void }) => (
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <button 
-              onClick={() => onStart("auth")}
+              onClick={() => onStart("auth", "BRAND")}
               className="bg-emerald-600 text-white px-8 py-4 rounded-2xl font-bold hover:bg-emerald-700 transition-all shadow-xl shadow-emerald-100 flex items-center justify-center gap-2"
             >
               I'm a Brand <ArrowRight size={20} />
             </button>
             <button 
-              onClick={() => onStart("auth")}
+              onClick={() => onStart("auth", "INFLUENCER")}
               className="bg-white text-zinc-900 border border-zinc-200 px-8 py-4 rounded-2xl font-bold hover:bg-zinc-50 transition-all flex items-center justify-center gap-2"
             >
               I'm an Influencer <ArrowUpRight size={20} />
@@ -353,23 +478,43 @@ const BrandDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: stri
   }, [selectedCampaign]);
 
   const fetchBrands = async () => {
-    const res = await authenticatedFetch("/api/brands");
-    const data = await res.json();
-    setBrands(data);
-    if (data.length > 0) {
-      if (!selectedBrand) {
-        setSelectedBrand(data[0]);
+    try {
+      const res = await authenticatedFetch("/api/brands");
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setBrands(data);
+        if (data.length > 0) {
+          if (!selectedBrand) {
+            setSelectedBrand(data[0]);
+          } else {
+            const updated = data.find((b: any) => b.id === selectedBrand.id);
+            if (updated) setSelectedBrand(updated);
+          }
+        }
       } else {
-        const updated = data.find((b: any) => b.id === selectedBrand.id);
-        if (updated) setSelectedBrand(updated);
+        console.error("Fetch brands error: Expected array, got", data);
+        setBrands([]);
       }
+    } catch (err) {
+      console.error("Fetch brands error:", err);
+      setBrands([]);
     }
   };
 
   const fetchCampaigns = async () => {
-    const res = await authenticatedFetch("/api/campaigns");
-    const data = await res.json();
-    setCampaigns(data.filter((c: any) => c.brand_id === selectedBrand?.id));
+    try {
+      const res = await authenticatedFetch("/api/campaigns");
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setCampaigns(data.filter((c: any) => c.brandId === selectedBrand?.id));
+      } else {
+        console.error("Fetch campaigns error: Expected array, got", data);
+        setCampaigns([]);
+      }
+    } catch (err) {
+      console.error("Fetch campaigns error:", err);
+      setCampaigns([]);
+    }
   };
 
   const handleSubscribe = async () => {
@@ -389,9 +534,19 @@ const BrandDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: stri
   };
 
   const fetchInfluencers = async () => {
-    const res = await authenticatedFetch("/api/influencers");
-    const data = await res.json();
-    setAllInfluencers(data);
+    try {
+      const res = await authenticatedFetch("/api/influencers");
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setAllInfluencers(data);
+      } else {
+        console.error("Fetch influencers error: Expected array, got", data);
+        setAllInfluencers([]);
+      }
+    } catch (err) {
+      console.error("Fetch influencers error:", err);
+      setAllInfluencers([]);
+    }
   };
 
   const fetchStats = async (id: string) => {
@@ -404,11 +559,23 @@ const BrandDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: stri
     if (!selectedCampaign) return;
     const res = await authenticatedFetch("/api/links", {
       method: "POST",
-      body: JSON.stringify({ campaign_id: selectedCampaign.id, influencer_id: influencerId })
+      body: JSON.stringify({ campaignId: selectedCampaign.id, influencerId })
     });
     if (res.ok) {
       fetchStats(selectedCampaign.id);
       setShowAssign(false);
+    }
+  };
+
+  const handleConfirmSale = async (shortCode: string) => {
+    if (!selectedCampaign) return;
+    const res = await authenticatedFetch(`/api/links/${shortCode}/convert`, {
+      method: "POST"
+    });
+    if (res.ok) {
+      fetchStats(selectedCampaign.id);
+      fetchBrands(); // Update balance
+      alert("Sale confirmed! Payout task created for admin approval.");
     }
   };
 
@@ -621,6 +788,7 @@ const BrandDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: stri
                       <th className="px-6 py-4 text-xs font-bold text-zinc-400 uppercase">Short Code</th>
                       <th className="px-6 py-4 text-xs font-bold text-zinc-400 uppercase text-right">Clicks</th>
                       <th className="px-6 py-4 text-xs font-bold text-zinc-400 uppercase text-right">Sales</th>
+                      <th className="px-6 py-4 text-xs font-bold text-zinc-400 uppercase text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-100">
@@ -630,6 +798,14 @@ const BrandDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: stri
                         <td className="px-6 py-4 font-mono text-xs text-zinc-500">{s.short_code}</td>
                         <td className="px-6 py-4 text-right text-zinc-900">{s.click_count}</td>
                         <td className="px-6 py-4 text-right font-bold text-emerald-600">{s.conversion_count}</td>
+                        <td className="px-6 py-4 text-right">
+                          <button 
+                            onClick={() => handleConfirmSale(s.short_code)}
+                            className="bg-emerald-50 text-emerald-600 px-3 py-1 rounded-lg text-[10px] font-bold hover:bg-emerald-100 transition-colors"
+                          >
+                            Confirm Sale
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -868,87 +1044,231 @@ const BrandDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: stri
 const InfluencerDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: string, options?: RequestInit) => Promise<Response> }) => {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [walletData, setWalletData] = useState<any>(null);
+  const [links, setLinks] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     fetchData();
     fetchWallet();
+    fetchLinks();
   }, []);
 
   const fetchData = async () => {
-    const res = await authenticatedFetch("/api/campaigns");
-    const data = await res.json();
-    setCampaigns(data);
+    try {
+      const res = await authenticatedFetch("/api/campaigns");
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setCampaigns(data);
+      } else {
+        console.error("Fetch campaigns error: Expected array, got", data);
+        setCampaigns([]);
+      }
+    } catch (err) {
+      console.error("Fetch campaigns error:", err);
+      setCampaigns([]);
+    }
   };
 
   const fetchWallet = async () => {
-    const res = await authenticatedFetch("/api/influencers/wallet");
-    const data = await res.json();
-    setWalletData(data);
+    try {
+      const res = await authenticatedFetch("/api/influencers/wallet");
+      const data = await res.json();
+      if (res.ok) {
+        setWalletData(data);
+      } else {
+        console.error("Fetch wallet error:", data);
+      }
+    } catch (err) {
+      console.error("Fetch wallet error:", err);
+    }
+  };
+
+  const fetchLinks = async () => {
+    try {
+      const res = await authenticatedFetch("/api/influencers/links");
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setLinks(data);
+      } else {
+        console.error("Fetch links error:", data);
+        setLinks([]);
+      }
+    } catch (err) {
+      console.error("Fetch links error:", err);
+      setLinks([]);
+    }
+  };
+
+  const handleGetLink = async (campaignId: string) => {
+    setLoading(true);
+    try {
+      const res = await authenticatedFetch("/api/links", {
+        method: "POST",
+        body: JSON.stringify({ campaignId })
+      });
+      if (res.ok) {
+        await fetchLinks();
+      }
+    } catch (err) {
+      console.error("Error generating link:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const copyToClipboard = (text: string) => {
+    const fullUrl = `${window.location.origin}/l/${text}`;
+    navigator.clipboard.writeText(fullUrl);
+    alert("Tracking link copied to clipboard!");
   };
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      <div className="mb-12">
-        <h2 className="text-3xl font-bold text-zinc-900 tracking-tight">Influencer Portal</h2>
-        <p className="text-zinc-500">Pick a campaign and start earning</p>
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
+        <div>
+          <h2 className="text-3xl font-bold text-zinc-900 tracking-tight">Influencer Portal</h2>
+          <p className="text-zinc-500">Pick a campaign and start earning</p>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="bg-white px-6 py-3 rounded-2xl border border-zinc-100 shadow-sm">
+            <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Total Earnings</div>
+            <div className="text-xl font-bold text-emerald-600">₦{walletData?.influencer?.walletBalance?.toLocaleString() || "0"}</div>
+          </div>
+        </div>
       </div>
 
       {walletData ? (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16">
-          <div className="lg:col-span-1 bg-zinc-900 text-white p-8 rounded-[40px] shadow-xl relative overflow-hidden">
-            <div className="relative z-10">
-              <div className="flex justify-between items-start mb-8">
-                <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center">
-                  <Wallet size={24} className="text-emerald-400" />
-                </div>
-                <span className="text-[10px] font-bold uppercase tracking-widest text-white/40">Available Balance</span>
+          <div className="lg:col-span-2 bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
+            <div className="flex items-center justify-between mb-8">
+              <div className="flex items-center gap-2">
+                <TrendingUp size={20} className="text-emerald-600" />
+                <h3 className="font-bold text-zinc-900">Your Performance</h3>
               </div>
-              <div className="text-4xl font-bold mb-2">₦{walletData.influencer?.walletBalance?.toLocaleString() || "0"}</div>
-              <div className="text-xs text-white/40 mb-8">Role: {walletData.influencer?.user?.role}</div>
+              <div className="text-xs text-zinc-400 font-bold uppercase tracking-widest">Active Links: {links.length}</div>
             </div>
-            <div className="absolute -top-24 -right-24 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl" />
+            
+            {links.length > 0 ? (
+              <div className="overflow-hidden rounded-3xl border border-zinc-50">
+                <table className="w-full text-left">
+                  <thead className="bg-zinc-50 border-b border-zinc-100">
+                    <tr>
+                      <th className="px-6 py-4 text-[10px] font-bold text-zinc-400 uppercase">Campaign</th>
+                      <th className="px-6 py-4 text-[10px] font-bold text-zinc-400 uppercase text-right">Clicks</th>
+                      <th className="px-6 py-4 text-[10px] font-bold text-zinc-400 uppercase text-right">Sales</th>
+                      <th className="px-6 py-4 text-[10px] font-bold text-zinc-400 uppercase text-right">Revenue</th>
+                      <th className="px-6 py-4 text-[10px] font-bold text-zinc-400 uppercase text-right">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-50">
+                    {links.map((link) => (
+                      <tr key={link.id} className="hover:bg-zinc-50/50 transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="font-bold text-zinc-900 text-sm">{link.campaign?.title || "Unknown"}</div>
+                          <div className="text-[10px] font-mono text-zinc-400 uppercase tracking-tighter">Code: {link.shortCode}</div>
+                        </td>
+                        <td className="px-6 py-4 text-right text-sm font-medium">{link.clickCount}</td>
+                        <td className="px-6 py-4 text-right text-sm font-bold text-emerald-600">{link.conversionCount}</td>
+                        <td className="px-6 py-4 text-right text-sm font-bold text-zinc-900">
+                          ₦{(link.conversionCount * (link.campaign?.payout_per_lead || 0)).toLocaleString()}
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <button 
+                            onClick={() => copyToClipboard(link.shortCode)}
+                            className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                            title="Copy Tracking Link"
+                          >
+                            <LinkIcon size={16} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="text-center py-12 bg-zinc-50 rounded-3xl border border-dashed border-zinc-200">
+                <LinkIcon size={32} className="mx-auto mb-3 text-zinc-300" />
+                <p className="text-zinc-500 text-sm">You haven't generated any tracking links yet.</p>
+              </div>
+            )}
           </div>
 
-          <div className="lg:col-span-2 bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
+          <div className="lg:col-span-1 bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
             <div className="flex items-center gap-2 mb-6">
               <History size={20} className="text-zinc-400" />
-              <h3 className="font-bold text-zinc-900">Recent Transactions</h3>
+              <h3 className="font-bold text-zinc-900">Recent Payouts</h3>
             </div>
             <div className="space-y-4">
               {walletData.transactions?.length > 0 ? walletData.transactions.map((t: any) => (
                 <div key={t.id} className="flex justify-between items-center p-4 rounded-2xl bg-zinc-50 border border-zinc-100">
                   <div>
-                    <div className="font-bold text-zinc-900">{t.type}</div>
+                    <div className="font-bold text-zinc-900 text-sm">{t.type}</div>
                     <div className="text-[10px] text-zinc-400 uppercase tracking-tighter">{new Date(t.createdAt).toLocaleString()}</div>
                   </div>
-                  <div className={`text-right font-bold ${t.type === 'CREDIT' ? 'text-emerald-600' : 'text-red-600'}`}>
+                  <div className={`text-right font-bold text-sm ${t.type === 'CREDIT' ? 'text-emerald-600' : 'text-red-600'}`}>
                     {t.type === 'CREDIT' ? '+' : '-'}₦{t.amount.toLocaleString()}
                   </div>
                 </div>
-              )) : <div className="text-center text-zinc-400 py-8">No transactions yet</div>}
+              )) : <div className="text-center text-zinc-400 py-8 text-sm italic">No transactions yet</div>}
             </div>
           </div>
         </div>
       ) : <div className="p-12 text-center text-zinc-400">Loading wallet...</div>}
 
-      <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-widest mb-6">Available Campaigns</h3>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {campaigns.map((c) => (
-          <div key={c.id} className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm hover:shadow-md transition-all">
-            <h4 className="text-xl font-bold text-zinc-900 mb-2">{c.title}</h4>
-            <p className="text-zinc-500 text-sm mb-6 line-clamp-2">{c.description}</p>
-            <div className="flex justify-between items-center">
-              <div>
-                <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Payout</div>
-                <div className="text-lg font-bold text-emerald-600">₦{c.payout_per_lead}/lead</div>
-              </div>
-              <button className="bg-zinc-100 text-zinc-900 px-4 py-2 rounded-xl text-xs font-bold hover:bg-zinc-200 transition-all">
-                Get Link
-              </button>
-            </div>
-          </div>
-        ))}
+      <div className="mb-8 flex justify-between items-end">
+        <div>
+          <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-widest mb-1">Available Campaigns</h3>
+          <p className="text-xs text-zinc-500">Earn money by promoting these brands</p>
+        </div>
       </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {campaigns.map((c) => {
+          const hasLink = links.some(l => l.campaignId === c.id);
+          return (
+            <div key={c.id} className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm hover:shadow-md transition-all group">
+              <div className="flex justify-between items-start mb-4">
+                <h4 className="text-xl font-bold text-zinc-900 group-hover:text-emerald-600 transition-colors">{c.title}</h4>
+                <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
+                  <Megaphone size={20} />
+                </div>
+              </div>
+              <p className="text-zinc-500 text-sm mb-8 line-clamp-2 leading-relaxed">{c.description}</p>
+              <div className="flex justify-between items-center pt-6 border-t border-zinc-50">
+                <div>
+                  <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">Payout</div>
+                  <div className="text-lg font-bold text-emerald-600">₦{c.payout_per_lead}/lead</div>
+                </div>
+                {hasLink ? (
+                  <button 
+                    onClick={() => copyToClipboard(links.find(l => l.campaignId === c.id).shortCode)}
+                    className="bg-emerald-600 text-white px-6 py-3 rounded-2xl text-xs font-bold hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-lg shadow-emerald-100"
+                  >
+                    <LinkIcon size={14} /> Copy Link
+                  </button>
+                ) : (
+                  <button 
+                    onClick={() => handleGetLink(c.id)}
+                    disabled={loading}
+                    className="bg-zinc-900 text-white px-6 py-3 rounded-2xl text-xs font-bold hover:bg-zinc-800 transition-all disabled:opacity-50"
+                  >
+                    {loading ? "Generating..." : "Join Campaign"}
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {campaigns.length === 0 && (
+        <div className="text-center py-24 bg-white rounded-[40px] border border-dashed border-zinc-200">
+          <Megaphone size={48} className="mx-auto mb-4 text-zinc-200" />
+          <h3 className="text-xl font-bold text-zinc-900 mb-2">No Active Campaigns</h3>
+          <p className="text-zinc-500 max-w-sm mx-auto">There are currently no open campaigns. Check back later or contact support.</p>
+        </div>
+      )}
     </div>
   );
 };
@@ -1341,6 +1661,16 @@ export default function App() {
   const [token, setToken] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [intendedRole, setIntendedRole] = useState<'BRAND' | 'INFLUENCER' | null>(null);
+
+  // Redirect logged-in users to their correct dashboard
+  useEffect(() => {
+    if (isAuthReady && user && (activeView === "auth" || activeView === "landing")) {
+      if (user.role === "ADMIN") setActiveView("admin");
+      else if (user.role === "BRAND") setActiveView("brand");
+      else setActiveView("influencer");
+    }
+  }, [isAuthReady, user, activeView]);
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [influencers, setInfluencers] = useState<Influencer[]>([]);
@@ -1375,13 +1705,11 @@ export default function App() {
             userSnap = await getDoc(userRef);
           } catch (err) {
             console.error("Error fetching user profile:", err);
-            // If we can't fetch the profile, we might still want to set the user locally
-            // but with a temporary role or just the basic info
             setUser({
               id: firebaseUser.uid,
               name: firebaseUser.displayName || "User",
               email: firebaseUser.email || "",
-              role: "INFLUENCER" // Default fallback
+              role: intendedRole || "INFLUENCER" // Use intended role if available
             });
             setIsAuthReady(true);
             return;
@@ -1421,12 +1749,12 @@ export default function App() {
               console.error("Error ensuring associated profile:", profileErr);
             }
           } else {
-            // New user - default to INFLUENCER
+            // New user - use intendedRole or default to INFLUENCER
             const newUser: User = {
               id: firebaseUser.uid,
               name: firebaseUser.displayName || "New User",
               email: firebaseUser.email || "",
-              role: "INFLUENCER"
+              role: intendedRole || "INFLUENCER"
             };
             
             try {
@@ -1436,13 +1764,22 @@ export default function App() {
                 updatedAt: serverTimestamp()
               });
               
-              // Create influencer profile
-              await setDoc(doc(db, "influencers", firebaseUser.uid), {
-                userId: firebaseUser.uid,
-                followers: 0,
-                walletBalance: 0,
-                createdAt: serverTimestamp()
-              });
+              if (newUser.role === "BRAND") {
+                await setDoc(doc(db, "brands", firebaseUser.uid), {
+                  userId: firebaseUser.uid,
+                  companyName: firebaseUser.displayName || "New Brand",
+                  subscriptionStatus: "inactive",
+                  balance: 0,
+                  createdAt: serverTimestamp()
+                });
+              } else {
+                await setDoc(doc(db, "influencers", firebaseUser.uid), {
+                  userId: firebaseUser.uid,
+                  followers: 0,
+                  walletBalance: 0,
+                  createdAt: serverTimestamp()
+                });
+              }
             } catch (createErr) {
               console.error("Error creating new user profile:", createErr);
             }
@@ -1461,11 +1798,17 @@ export default function App() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [intendedRole]);
 
   const handleLogout = async () => {
     await logout();
     setActiveView("landing");
+    setIntendedRole(null);
+  };
+
+  const handleStart = (view: string, role?: 'BRAND' | 'INFLUENCER') => {
+    if (role) setIntendedRole(role);
+    setActiveView(view);
   };
 
   const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
@@ -1588,44 +1931,50 @@ export default function App() {
       </div>
 
       <main className="flex-1">
-        <AnimatePresence mode="wait">
-          {activeView === "landing" && (
-            <motion.div key="landing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <LandingPage onStart={() => setActiveView(user ? "analytics" : "auth")} />
-            </motion.div>
-          )}
-          {activeView === "auth" && !user && (
-            <motion.div key="auth" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <Auth />
-            </motion.div>
-          )}
-          {activeView === "brand" && user && (user.role === "BRAND" || user.role === "ADMIN") && (
-            <motion.div key="brand" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <BrandDashboard authenticatedFetch={authenticatedFetch} />
-            </motion.div>
-          )}
-          {activeView === "influencer" && user && (user.role === "INFLUENCER" || user.role === "ADMIN") && (
-            <motion.div key="influencer" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <InfluencerDashboard authenticatedFetch={authenticatedFetch} />
-            </motion.div>
-          )}
-          {activeView === "analytics" && user && (
-            <motion.div key="analytics" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <AnalyticsDashboard authenticatedFetch={authenticatedFetch} />
-            </motion.div>
-          )}
-          {activeView === "admin" && user && user.role === "ADMIN" && (
-            <motion.div key="admin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full">
-              <AdminDashboard authenticatedFetch={authenticatedFetch} />
-            </motion.div>
-          )}
-          {/* Fallback for unauthorized or unauthenticated */}
-          {activeView !== "landing" && activeView !== "auth" && !user && isAuthReady && (
-            <motion.div key="unauth" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <Auth />
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {!isAuthReady ? (
+          <div className="min-h-[60vh] flex items-center justify-center">
+            <div className="w-12 h-12 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
+          </div>
+        ) : (
+          <AnimatePresence mode="wait">
+            {activeView === "landing" && (
+              <motion.div key="landing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <LandingPage onStart={handleStart} />
+              </motion.div>
+            )}
+            {activeView === "auth" && !user && (
+              <motion.div key="auth" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <Auth intendedRole={intendedRole} onAuthSuccess={() => {}} />
+              </motion.div>
+            )}
+            {activeView === "brand" && user && (user.role === "BRAND" || user.role === "ADMIN") && (
+              <motion.div key="brand" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <BrandDashboard authenticatedFetch={authenticatedFetch} />
+              </motion.div>
+            )}
+            {activeView === "influencer" && user && (user.role === "INFLUENCER" || user.role === "ADMIN") && (
+              <motion.div key="influencer" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <InfluencerDashboard authenticatedFetch={authenticatedFetch} />
+              </motion.div>
+            )}
+            {activeView === "analytics" && user && (
+              <motion.div key="analytics" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <AnalyticsDashboard authenticatedFetch={authenticatedFetch} />
+              </motion.div>
+            )}
+            {activeView === "admin" && user && user.role === "ADMIN" && (
+              <motion.div key="admin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full">
+                <AdminDashboard authenticatedFetch={authenticatedFetch} />
+              </motion.div>
+            )}
+            {/* Fallback for unauthorized or unauthenticated */}
+            {activeView !== "landing" && activeView !== "auth" && !user && (
+              <motion.div key="unauth" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <Auth intendedRole={intendedRole} onAuthSuccess={() => {}} />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        )}
       </main>
 
       <footer className="border-t border-zinc-200 bg-white py-12 mt-24">

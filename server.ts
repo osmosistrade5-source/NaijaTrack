@@ -8,6 +8,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { getAdminDb } from "./src/server/config/firebase-admin";
 import apiRoutes from "./src/server/routes/index";
+import { trackClick } from "./src/server/controllers/link";
 
 dotenv.config();
 
@@ -62,6 +63,9 @@ async function startServer() {
 
   // API Routes
   app.use("/api", apiRoutes);
+
+  // Tracking Links
+  app.get("/l/:shortCode", trackClick);
 
   // Health Check
   app.get("/api/health", (req, res) => {

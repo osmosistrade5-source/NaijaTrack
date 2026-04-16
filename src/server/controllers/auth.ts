@@ -14,7 +14,11 @@ export const getProfile = async (req: AuthRequest, res: Response) => {
       const user = userDoc.data();
       res.json({ user: { id: userDoc.id, ...user } });
     } catch (dbError: any) {
-      if (dbError.code === 7 || dbError.message?.includes("PERMISSION_DENIED")) {
+      const isPermissionError = dbError.code === 7 || 
+                               dbError.message?.includes("PERMISSION_DENIED") ||
+                               dbError.message?.includes("Missing or insufficient permissions");
+      
+      if (isPermissionError) {
         console.warn("Permission denied to Firestore in getProfile, using request user info.");
         return res.json({ 
           user: { 
