@@ -408,14 +408,7 @@ const Navbar = ({ activeView, setActiveView, user, onLogout }: { activeView: str
                 Logout
               </button>
             </div>
-          ) : (
-            <button
-              onClick={() => setActiveView("auth")}
-              className="bg-emerald-600 text-white px-6 py-2 rounded-xl text-sm font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100"
-            >
-              Get Started
-            </button>
-          )}
+          ) : null}
         </div>
       </div>
     </div>
@@ -425,7 +418,7 @@ const Navbar = ({ activeView, setActiveView, user, onLogout }: { activeView: str
 const LandingPage = ({ onStart }: { onStart: (view: string, role?: 'BRAND' | 'INFLUENCER') => void }) => (
   <div className="bg-white">
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
-      <div className="text-center max-w-3xl mx-auto">
+      <div id="hero" className="text-center max-w-3xl mx-auto">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -492,6 +485,25 @@ const LandingPage = ({ onStart }: { onStart: (view: string, role?: 'BRAND' | 'IN
             <p className="text-zinc-500 leading-relaxed">{feature.desc}</p>
           </motion.div>
         ))}
+      </div>
+
+      {/* Landing Page Bottom CTA */}
+      <div className="mt-40 p-12 md:p-20 bg-zinc-900 rounded-[48px] text-center text-white relative overflow-hidden">
+        <div className="absolute top-0 right-0 p-12 opacity-5 rotate-12">
+          <TrendingUp size={200} />
+        </div>
+        <div className="relative z-10 max-w-2xl mx-auto">
+          <h2 className="text-3xl md:text-5xl font-bold mb-8">Ready to grow your revenue?</h2>
+          <p className="text-zinc-400 text-lg md:text-xl mb-12">
+            Experience the future of performance tracking. Direct, transparent, and built for building trust.
+          </p>
+          <button 
+            onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+            className="bg-emerald-500 hover:bg-emerald-400 text-black px-12 py-6 rounded-2xl font-black text-xl transition-all shadow-2xl shadow-emerald-500/25"
+          >
+            Get Started Now
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -570,6 +582,22 @@ const BrandDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: stri
     } catch (err) {
       console.error("Fetch campaigns error:", err);
       setCampaigns([]);
+    }
+  };
+
+  const handleActivate = async () => {
+    if (!selectedBrand) return;
+    try {
+      const res = await authenticatedFetch(`/api/brands/activate`, { method: "POST" });
+      const data = await res.json();
+      if (data.authorization_url) {
+        window.location.href = data.authorization_url;
+      } else {
+        alert("Failed to initialize payment");
+      }
+    } catch (err) {
+      console.error("Activation error:", err);
+      alert("An error occurred while processing your activation.");
     }
   };
 
@@ -703,10 +731,10 @@ const BrandDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: stri
 
           {selectedBrand?.subscriptionStatus === 'inactive' ? (
             <button 
-              onClick={handleSubscribe}
+              onClick={handleActivate}
               className="bg-emerald-600 text-white px-6 py-3 rounded-full font-semibold hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-lg shadow-emerald-200"
             >
-              <Wallet size={20} /> Pay Monthly Fee (₦15,000)
+              <Wallet size={20} /> Pay Monthly Fee (₦10,000)
             </button>
           ) : (
             <button 
@@ -1329,7 +1357,7 @@ const InfluencerDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url:
   );
 };
 
-const AnalyticsDashboard = () => {
+const AnalyticsDashboard = ({ onNavigateToLanding }: { onNavigateToLanding: () => void }) => {
   const [data, setData] = useState<any>(null);
 
   useEffect(() => {
@@ -1391,7 +1419,7 @@ const AnalyticsDashboard = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-50">
-                  {data.topInfluencers.length > 0 ? data.topInfluencers.map((inf: any, i: number) => (
+                  {data.topInfluencers && data.topInfluencers.length > 0 ? data.topInfluencers.map((inf: any, i: number) => (
                     <tr key={i} className="hover:bg-zinc-50/50 transition-colors">
                       <td className="px-8 py-6">
                         <div className="font-bold text-zinc-900 capitalize">{inf.name}</div>
@@ -1436,7 +1464,7 @@ const AnalyticsDashboard = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-50">
-                  {data.topCampaigns.length > 0 ? data.topCampaigns.map((camp: any, i: number) => (
+                  {data.topCampaigns && data.topCampaigns.length > 0 ? data.topCampaigns.map((camp: any, i: number) => (
                     <tr key={i} className="hover:bg-zinc-50/50 transition-colors">
                       <td className="px-8 py-6">
                         <div className="font-bold text-zinc-900 capitalize truncate max-w-[200px]">{camp.title}</div>
@@ -1468,7 +1496,10 @@ const AnalyticsDashboard = () => {
           Join hundreds of brands and influencers leveraging NaijaTrack for data-driven campaign management and instant rewards.
         </p>
         <div className="flex flex-wrap justify-center gap-4">
-          <button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} className="px-8 py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-black rounded-2xl transition-all shadow-xl shadow-emerald-500/20">
+          <button 
+            onClick={onNavigateToLanding}
+            className="px-8 py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-black rounded-2xl transition-all shadow-xl shadow-emerald-500/20"
+          >
             Get Started Now
           </button>
         </div>
@@ -2144,7 +2175,10 @@ export default function App() {
             )}
             {activeView === "analytics" && (
               <motion.div key="analytics" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                <AnalyticsDashboard />
+                <AnalyticsDashboard onNavigateToLanding={() => {
+                  setActiveView("landing");
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }} />
               </motion.div>
             )}
             {activeView === "admin" && user && user.role === "ADMIN" && (

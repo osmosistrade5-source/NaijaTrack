@@ -73,9 +73,25 @@ export const paystackWebhook = async (req: Request, res: Response) => {
               const brandsRef = adminDb.collection("brands");
               const brandQuery = await brandsRef.where("userId", "==", transactionData.userId).limit(1).get();
               if (!brandQuery.empty) {
-                transaction.update(brandQuery.docs[0].ref, {
-                  balance: admin.firestore.FieldValue.increment(actualAmount)
-                });
+                const brandDoc = brandQuery.docs[0];
+                if (transactionData.type === "SUBSCRIPTION" || transactionData.reference?.startsWith("ACT-")) {
+                  // Direct activation
+                  transaction.update(brandDoc.ref, {
+                    subscriptionStatus: "active"
+                  });
+                  
+                  const adminWalletRef = adminDb.collection("admin_wallets").doc("main");
+                  transaction.update(adminWalletRef, {
+                    totalEarnings: admin.firestore.FieldValue.increment(actualAmount),
+                    subscriptionRevenue: admin.firestore.FieldValue.increment(actualAmount),
+                    updatedAt: new Date().toISOString()
+                  });
+                } else {
+                  // Standard funding
+                  transaction.update(brandDoc.ref, {
+                    balance: admin.firestore.FieldValue.increment(actualAmount)
+                  });
+                }
               }
             }
           });

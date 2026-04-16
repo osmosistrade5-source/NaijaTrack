@@ -3,7 +3,7 @@ import { getProfile } from "../controllers/auth";
 import { createCampaign, getCampaigns } from "../controllers/campaign";
 import { fundWallet, paystackWebhook, payoutInfluencer } from "../controllers/payment";
 import { getAdminStats, getAllUsers, getAllTransactions } from "../controllers/admin";
-import { getBrandWallet, subscribeBrand, getBrands } from "../controllers/brand";
+import { getBrandWallet, subscribeBrand, getBrands, initializeActivation } from "../controllers/brand";
 import { getInfluencerWallet, getInfluencers } from "../controllers/influencer";
 import { createLink, getInfluencerLinks, getCampaignStats, confirmConversion } from "../controllers/link";
 import { getPublicAnalytics } from "../controllers/public";
@@ -18,6 +18,7 @@ router.get("/auth/profile", authenticate, getProfile);
 router.get("/brands", authenticate, getBrands);
 router.get("/brands/wallet", authenticate, authorize(["BRAND"]), getBrandWallet);
 router.post("/brands/subscribe", authenticate, authorize(["BRAND"]), subscribeBrand);
+router.post("/brands/activate", authenticate, authorize(["BRAND"]), initializeActivation);
 
 // Influencer routes
 router.get("/influencers", authenticate, getInfluencers);
@@ -39,6 +40,9 @@ router.get("/public/analytics", getPublicAnalytics);
 // Payment routes
 router.post("/payments/fund", authenticate, fundWallet);
 router.post("/payments/webhook", paystackWebhook);
+router.get("/payments/callback", (req, res) => {
+  res.redirect("/");
+});
 router.post("/payments/payout", authenticate, authorize(["ADMIN"]), payoutInfluencer);
 
 // Admin routes

@@ -1,6 +1,7 @@
 import { Response } from "express";
 import { getAdminDb } from "../config/firebase-admin";
 import { AuthRequest } from "../middleware/auth";
+import { initializeTransaction } from "../utils/paystack";
 import admin from "firebase-admin";
 
 export const getBrandWallet = async (req: AuthRequest, res: Response) => {
@@ -26,8 +27,35 @@ export const getBrandWallet = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const initializeActivation = async (req: AuthRequest, res: Response) => {
+  const fee = 10000;
+  try {
+    const adminDb = getAdminDb();
+    const userDoc = await adminDb.collection("users").doc(req.user!.id).get();
+    if (!userDoc.exists) return res.status(404).json({ error: "User not found" });
+    const user = userDoc.data();
+
+    const reference = `ACT-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const paystackResponse = await initializeTransaction(user!.email, fee, reference);
+
+    await adminDb.collection("transactions").add({
+      userId: userDoc.id,
+      type: "SUBSCRIPTION",
+      amount: fee,
+      reference,
+      status: "PENDING",
+      createdAt: new Date().toISOString()
+    });
+
+    res.json(paystackResponse.data);
+  } catch (error) {
+    console.error("Initialize activation error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
 export const subscribeBrand = async (req: AuthRequest, res: Response) => {
-  const fee = 15000;
+  const fee = 10000;
   try {
     const adminDb = getAdminDb();
     const brandsRef = adminDb.collection("brands");
