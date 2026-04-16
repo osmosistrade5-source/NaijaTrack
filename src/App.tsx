@@ -374,9 +374,12 @@ const Navbar = ({ activeView, setActiveView, user, onLogout }: { activeView: str
           {[
             { id: "brand", label: "Brand Dashboard", icon: Megaphone, roles: ["ADMIN", "BRAND"] },
             { id: "influencer", label: "Influencer Portal", icon: Users, roles: ["ADMIN", "INFLUENCER"] },
-            { id: "analytics", label: "Analytics", icon: TrendingUp, roles: ["ADMIN", "BRAND", "INFLUENCER"] },
+            { id: "analytics", label: "Analytics", icon: TrendingUp, roles: ["ADMIN", "BRAND", "INFLUENCER", "PUBLIC"] },
             { id: "admin", label: "Admin", icon: ShieldCheck, roles: ["ADMIN"] },
-          ].filter(item => !user || item.roles.includes(user.role)).map((item) => (
+          ].filter(item => {
+            if (item.id === "analytics") return true; // Always show analytics
+            return user && item.roles.includes(user.role);
+          }).map((item) => (
             <button
               key={item.id}
               onClick={() => setActiveView(item.id)}
@@ -1326,36 +1329,148 @@ const InfluencerDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url:
   );
 };
 
-const AnalyticsDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: string, options?: RequestInit) => Promise<Response> }) => {
+const AnalyticsDashboard = () => {
   const [data, setData] = useState<any>(null);
 
   useEffect(() => {
-    authenticatedFetch("/api/admin/stats")
+    fetch("/api/public/analytics")
       .then(res => res.json())
-      .then(setData);
+      .then(setData)
+      .catch(err => console.error("Failed to fetch public analytics:", err));
   }, []);
 
-  if (!data) return <div className="p-12 text-center text-zinc-400">Loading analytics...</div>;
+  if (!data) return (
+    <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4">
+      <div className="w-12 h-12 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
+      <p className="text-zinc-500 font-medium">Crunching platform data...</p>
+    </div>
+  );
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      <div className="mb-12">
-        <h2 className="text-3xl font-bold text-zinc-900 tracking-tight">Platform Analytics</h2>
-        <p className="text-zinc-500">Real-time performance across the platform</p>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+      <div className="mb-16 text-center">
+        <h2 className="text-4xl md:text-5xl font-bold text-zinc-900 tracking-tight mb-4">Platform Performance</h2>
+        <p className="text-zinc-500 text-lg max-w-2xl mx-auto">
+          Real-time visibility into the NaijaTrack ecosystem. See how our network of influencers and brands are driving impact.
+        </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-8">
-        <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
-          <div className="text-zinc-400 text-xs font-bold uppercase mb-2">Total Earnings</div>
-          <div className="text-3xl font-bold text-emerald-600">₦{data.totalEarnings?.toLocaleString() || "0"}</div>
-        </div>
-        <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
-          <div className="text-zinc-400 text-xs font-bold uppercase mb-2">Subscription Revenue</div>
-          <div className="text-3xl font-bold text-zinc-900">₦{data.subscriptionRevenue?.toLocaleString() || "0"}</div>
-        </div>
-        <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
-          <div className="text-zinc-400 text-xs font-bold uppercase mb-2">Commission Revenue</div>
-          <div className="text-3xl font-bold text-zinc-900">₦{data.commissionRevenue?.toLocaleString() || "0"}</div>
+      {/* Global Stats bar */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-16">
+        {[
+          { label: "Total Traffic", value: data.totalClicks, color: "text-blue-600", bg: "bg-blue-50" },
+          { label: "Successful Sales", value: data.totalConversions, color: "text-emerald-600", bg: "bg-emerald-50" },
+          { label: "Active Brands", value: data.platformStats?.brands, color: "text-purple-600", bg: "bg-purple-50" },
+          { label: "Partnered Influencers", value: data.platformStats?.influencers, color: "text-orange-600", bg: "bg-orange-50" },
+        ].map((stat, i) => (
+          <div key={i} className={`${stat.bg} p-6 rounded-[32px] border border-zinc-100/50`}>
+            <div className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">{stat.label}</div>
+            <div className={`text-2xl font-black ${stat.color}`}>{stat.value?.toLocaleString() || "0"}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+        {/* Top Influencers */}
+        <section>
+          <div className="flex items-center gap-3 mb-8">
+            <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center text-white shadow-lg">
+              <Users size={20} />
+            </div>
+            <h3 className="text-2xl font-bold text-zinc-900">Leaderboard: Top Influencers</h3>
+          </div>
+          
+          <div className="bg-white rounded-[40px] border border-zinc-100 shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-zinc-50/50 border-b border-zinc-100">
+                    <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">Influencer</th>
+                    <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">Traffic</th>
+                    <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">Conversions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-50">
+                  {data.topInfluencers.length > 0 ? data.topInfluencers.map((inf: any, i: number) => (
+                    <tr key={i} className="hover:bg-zinc-50/50 transition-colors">
+                      <td className="px-8 py-6">
+                        <div className="font-bold text-zinc-900 capitalize">{inf.name}</div>
+                      </td>
+                      <td className="px-8 py-6">
+                        <div className="text-zinc-600 font-medium">{inf.clicks.toLocaleString()}</div>
+                      </td>
+                      <td className="px-8 py-6">
+                        <div className="inline-flex items-center px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-sm font-bold">
+                          {inf.conversions.toLocaleString()}
+                        </div>
+                      </td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan={3} className="px-8 py-12 text-center text-zinc-400">No stats available yet</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        {/* Top Campaigns */}
+        <section>
+          <div className="flex items-center gap-3 mb-8">
+            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg">
+              <Megaphone size={20} />
+            </div>
+            <h3 className="text-2xl font-bold text-zinc-900">Trending Campaigns</h3>
+          </div>
+
+          <div className="bg-white rounded-[40px] border border-zinc-100 shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-zinc-50/50 border-b border-zinc-100">
+                    <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">Campaign</th>
+                    <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">Interest</th>
+                    <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">Sales</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-50">
+                  {data.topCampaigns.length > 0 ? data.topCampaigns.map((camp: any, i: number) => (
+                    <tr key={i} className="hover:bg-zinc-50/50 transition-colors">
+                      <td className="px-8 py-6">
+                        <div className="font-bold text-zinc-900 capitalize truncate max-w-[200px]">{camp.title}</div>
+                      </td>
+                      <td className="px-8 py-6">
+                        <div className="text-zinc-600 font-medium">{camp.clicks.toLocaleString()}</div>
+                      </td>
+                      <td className="px-8 py-6">
+                        <div className="inline-flex items-center px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-sm font-bold">
+                          {camp.conversions.toLocaleString()}
+                        </div>
+                      </td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan={3} className="px-8 py-12 text-center text-zinc-400">No active campaigns yet</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div className="mt-20 p-12 bg-zinc-900 rounded-[40px] text-center text-white">
+        <h4 className="text-2xl font-bold mb-4">Want to be part of these stats?</h4>
+        <p className="text-white/60 mb-8 max-w-lg mx-auto">
+          Join hundreds of brands and influencers leveraging NaijaTrack for data-driven campaign management and instant rewards.
+        </p>
+        <div className="flex flex-wrap justify-center gap-4">
+          <button onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })} className="px-8 py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-black rounded-2xl transition-all shadow-xl shadow-emerald-500/20">
+            Get Started Now
+          </button>
         </div>
       </div>
     </div>
@@ -2027,9 +2142,9 @@ export default function App() {
                 <InfluencerDashboard authenticatedFetch={authenticatedFetch} />
               </motion.div>
             )}
-            {activeView === "analytics" && user && (
+            {activeView === "analytics" && (
               <motion.div key="analytics" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                <AnalyticsDashboard authenticatedFetch={authenticatedFetch} />
+                <AnalyticsDashboard />
               </motion.div>
             )}
             {activeView === "admin" && user && user.role === "ADMIN" && (
@@ -2038,7 +2153,7 @@ export default function App() {
               </motion.div>
             )}
             {/* Fallback for unauthorized or unauthenticated */}
-            {activeView !== "landing" && activeView !== "auth" && !user && (
+            {activeView !== "landing" && activeView !== "auth" && activeView !== "analytics" && !user && (
               <motion.div key="unauth" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                 <Auth intendedRole={intendedRole} onAuthSuccess={() => {}} />
               </motion.div>

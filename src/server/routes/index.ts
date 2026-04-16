@@ -6,6 +6,7 @@ import { getAdminStats, getAllUsers, getAllTransactions } from "../controllers/a
 import { getBrandWallet, subscribeBrand, getBrands } from "../controllers/brand";
 import { getInfluencerWallet, getInfluencers } from "../controllers/influencer";
 import { createLink, getInfluencerLinks, getCampaignStats, confirmConversion } from "../controllers/link";
+import { getPublicAnalytics } from "../controllers/public";
 import { authenticate, authorize } from "../middleware/auth";
 
 const router = Router();
@@ -31,6 +32,9 @@ router.get("/campaigns/:id/stats", authenticate, getCampaignStats);
 // Link routes
 router.post("/links", authenticate, authorize(["INFLUENCER"]), createLink);
 router.post("/links/:shortCode/convert", authenticate, authorize(["BRAND"]), confirmConversion);
+
+// Public route
+router.get("/public/analytics", getPublicAnalytics);
 
 // Payment routes
 router.post("/payments/fund", authenticate, fundWallet);
