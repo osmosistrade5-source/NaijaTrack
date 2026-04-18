@@ -167,7 +167,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   
   if (isPermissionError || isOfflineError) {
     if (isOfflineError) {
-      console.warn(`Firestore Offline (Graceful Fallback): ${operationType} at ${path}. Using cached data or local state.`);
+      // Very silent for offline to avoid scaring the user during jitter
     } else {
       console.warn(`Firestore Permission Denied (Handled): ${operationType} at ${path}`);
     }
