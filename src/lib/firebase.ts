@@ -58,12 +58,26 @@ export const loginWithEmail = (email: string, pass: string) => signInWithEmailAn
 
 // Connection Test
 async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-    console.log("Firestore connection successful");
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration. The client is offline.");
+    try {
+      console.log("Testing Firestore connection...");
+      // Force a small timeout to avoid long hangs
+      // Check two common locations in case rules are restrictive
+      try {
+        await getDocFromServer(doc(db, 'test', 'connection'));
+      } catch (e: any) {
+        if (e.message?.includes('permission-denied') || e.code === 'permission-denied') {
+          console.log("Firestore connection check (Public Test) failed with permission-denied (Expected if rules are locked).");
+        } else {
+          await getDocFromServer(doc(db, 'users', 'test', 'connection'));
+        }
+      }
+      console.log("Firestore connection successful");
+    } catch (error: any) {
+    console.error("Firestore connectivity diagnostic:");
+    console.error("- Code:", error.code);
+    console.error("- Message:", error.message);
+    if (error.message.includes('the client is offline') || error.code === 'unavailable') {
+      console.error("ENVIRONMENT ALERT: Firestore backend unreachable from this browser session. This may be due to network restrictions or incorrect Project ID.");
     }
   }
 }

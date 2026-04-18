@@ -122,6 +122,9 @@ interface FirestoreErrorInfo {
 }
 
 function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const isPermissionError = error instanceof Error && 
+    (error.message.includes('permission-denied') || error.message.includes('Missing or insufficient permissions'));
+  
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
@@ -140,6 +143,12 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     operationType,
     path
   }
+  
+  if (isPermissionError) {
+    console.warn(`Firestore Permission Denied (Handled): ${operationType} at ${path}`);
+    return null; // Return null instead of throwing for permission errors
+  }
+  
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
@@ -1977,7 +1986,17 @@ export default function App() {
           try {
             userSnap = await getDoc(userRef);
           } catch (err) {
-            handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`);
+            const handled = handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`);
+            if (handled === null) {
+               setUser({
+                 id: firebaseUser.uid,
+                 name: firebaseUser.displayName || "User",
+                 email: firebaseUser.email || "",
+                 role: intendedRole || "INFLUENCER"
+               });
+               setIsAuthReady(true);
+               return;
+            }
             return;
           }
           

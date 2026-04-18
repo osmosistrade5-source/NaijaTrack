@@ -1,5 +1,5 @@
 {
   "name": "NaijaTrack",
   "description": "Bridges social media influencer promotions to verifiable WhatsApp commerce closures for Nigerian SMEs with trackable links and performance-based attribution.",
-  "requestFramePermissions": []
+  "requestFramePermissions": ["geolocation", "camera"]
 }
