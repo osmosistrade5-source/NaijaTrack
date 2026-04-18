@@ -599,14 +599,41 @@ const BrandDashboard = ({ authenticatedFetch, user }: { authenticatedFetch: (url
   };
 
   const handlePayMonthlyFee = () => {
+    setShowPayModal(true);
+  };
+
+  const triggerPaystack = () => {
     if (!paystackConfig.publicKey || paystackConfig.publicKey === 'your_paystack_public_key') {
       alert("Paystack Public Key is not configured. Please add VITE_PAYSTACK_PUBLIC_KEY to your environment.");
       return;
     }
+    setShowPayModal(false);
     initializePayment({
         onSuccess: handlePaystackSuccess,
         onClose: handlePaystackClose
     });
+  };
+
+  const handlePayFromBalance = async () => {
+    try {
+      setIsActivating(true);
+      const res = await authenticatedFetch("/api/brands/subscribe", {
+        method: "POST",
+        body: JSON.stringify({}) // No reference means use balance
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert("Subscription successful! Your account is now active.");
+        setShowPayModal(false);
+        fetchBrands();
+      } else {
+        alert(data.error || "Failed to process subscription.");
+      }
+    } catch (err) {
+      console.error("Subscription error:", err);
+    } finally {
+      setIsActivating(false);
+    }
   };
 
   return (
@@ -849,6 +876,73 @@ const BrandDashboard = ({ authenticatedFetch, user }: { authenticatedFetch: (url
                   <button type="submit" className="flex-1 bg-emerald-600 text-white py-4 rounded-2xl font-bold hover:bg-emerald-700 transition-all">Confirm Deposit</button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Payment Selection Modal */}
+      <AnimatePresence>
+        {showPayModal && (
+          <div className="fixed inset-0 z-[160] flex items-center justify-center p-4 bg-zinc-900/40 backdrop-blur-md">
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }} 
+              animate={{ opacity: 1, y: 0 }} 
+              exit={{ opacity: 0, y: 20 }}
+              className="bg-white rounded-[40px] p-10 max-w-lg w-full shadow-[0_32px_64px_-16px_rgba(0,0,0,0.2)]"
+            >
+              <div className="flex justify-between items-start mb-8">
+                <div>
+                  <h3 className="text-3xl font-bold text-zinc-900 mb-2">Payment Options</h3>
+                  <p className="text-zinc-500 text-sm">Subscription Fee: <span className="text-zinc-900 font-black">₦10,000/month</span></p>
+                </div>
+                <button onClick={() => setShowPayModal(false)} className="p-2 hover:bg-zinc-100 rounded-full transition-colors text-zinc-400">
+                  <Plus size={24} className="rotate-45" />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <button 
+                  onClick={triggerPaystack}
+                  className="w-full bg-emerald-600 text-white p-6 rounded-3xl flex items-center justify-between hover:bg-emerald-700 transition-all group"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center">
+                      <CreditCard size={24} />
+                    </div>
+                    <div className="text-left">
+                      <div className="font-bold">Card or Bank Transfer</div>
+                      <div className="text-xs text-emerald-100">Pay securely via Paystack</div>
+                    </div>
+                  </div>
+                  <ChevronRight className="group-hover:translate-x-1 transition-transform" />
+                </button>
+
+                <button 
+                  disabled={!selectedBrand || selectedBrand.balance < 10000 || isActivating}
+                  onClick={handlePayFromBalance}
+                  className="w-full bg-zinc-50 border border-zinc-100 p-6 rounded-3xl flex items-center justify-between hover:bg-zinc-100 transition-all group disabled:opacity-50 disabled:grayscale"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-white rounded-2xl border border-zinc-100 flex items-center justify-center text-zinc-900">
+                      <Wallet size={24} />
+                    </div>
+                    <div className="text-left">
+                      <div className="font-bold text-zinc-900">Deduct from Balance</div>
+                      <div className="text-xs text-zinc-400">Current: ₦{selectedBrand?.balance?.toLocaleString()}</div>
+                    </div>
+                  </div>
+                  {selectedBrand && selectedBrand.balance < 10000 ? (
+                    <div className="text-[10px] font-bold text-red-500 uppercase tracking-widest bg-red-50 px-2 py-1 rounded">Low Funds</div>
+                  ) : (
+                    <ChevronRight className="group-hover:translate-x-1 transition-transform text-zinc-400" />
+                  )}
+                </button>
+              </div>
+
+              <p className="mt-8 text-[10px] text-center text-zinc-400 uppercase font-bold tracking-widest leading-relaxed">
+                By subscribing, you agree to NaijaTrack's terms and performance-based commission structure.
+              </p>
             </motion.div>
           </div>
         )}
