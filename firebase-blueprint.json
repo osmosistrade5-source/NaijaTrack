@@ -76,6 +76,32 @@
         "commissionRevenue": { "type": "number" },
         "updatedAt": { "type": "string", "format": "date-time" }
       }
+    },
+    "Link": {
+      "title": "Link",
+      "description": "Influencer campaign link",
+      "type": "object",
+      "properties": {
+        "campaignId": { "type": "string" },
+        "influencerId": { "type": "string" },
+        "shortCode": { "type": "string" },
+        "clickCount": { "type": "integer" },
+        "conversionCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Click": {
+      "title": "Click",
+      "description": "Individual click event",
+      "type": "object",
+      "properties": {
+        "linkId": { "type": "string" },
+        "campaignId": { "type": "string" },
+        "influencerId": { "type": "string" },
+        "userAgent": { "type": "string" },
+        "ip": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
     }
   },
   "firestore": {
@@ -102,6 +128,14 @@
     "admin/wallet": {
       "schema": "AdminWallet",
       "description": "Platform stats"
+    },
+    "links/{shortCode}": {
+      "schema": "Link",
+      "description": "Influencer links"
+    },
+    "clicks/{clickId}": {
+      "schema": "Click",
+      "description": "Analytics clicks"
     }
   }
 }

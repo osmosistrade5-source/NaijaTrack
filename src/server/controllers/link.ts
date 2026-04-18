@@ -62,7 +62,11 @@ export const getInfluencerLinks = async (req: AuthRequest, res: Response) => {
     }));
     
     res.json(links);
-  } catch (error) {
+  } catch (error: any) {
+    if (error.code === 7 || error.message?.includes("PERMISSION_DENIED")) {
+      console.warn("Permission denied while fetching links, returning empty array.");
+      return res.json([]);
+    }
     console.error("Fetch influencer links error:", error);
     res.status(500).json({ error: "Internal server error" });
   }

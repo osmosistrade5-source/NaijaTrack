@@ -509,7 +509,7 @@ const LandingPage = ({ onStart }: { onStart: (view: string, role?: 'BRAND' | 'IN
   </div>
 );
 
-const BrandDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: string, options?: RequestInit) => Promise<Response> }) => {
+const BrandDashboard = ({ authenticatedFetch, user }: { authenticatedFetch: (url: string, options?: RequestInit) => Promise<Response>, user: User }) => {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [selectedBrand, setSelectedBrand] = useState<Brand | null>(null);
@@ -519,6 +519,8 @@ const BrandDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: stri
   const [allInfluencers, setAllInfluencers] = useState<Influencer[]>([]);
   const [showAssign, setShowAssign] = useState(false);
   const [showDeposit, setShowDeposit] = useState(false);
+  const [showPayModal, setShowPayModal] = useState(false);
+  const [isActivating, setIsActivating] = useState(false);
   const [depositAmount, setDepositAmount] = useState("");
   const [newCampaign, setNewCampaign] = useState({
     title: "",
@@ -587,17 +589,20 @@ const BrandDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: stri
 
   const handleActivate = async () => {
     if (!selectedBrand) return;
+    setIsActivating(true);
     try {
       const res = await authenticatedFetch(`/api/brands/activate`, { method: "POST" });
       const data = await res.json();
       if (data.authorization_url) {
         window.location.href = data.authorization_url;
       } else {
-        alert("Failed to initialize payment");
+        alert("Failed to initialize payment: " + (data.error || "Unknown error"));
       }
     } catch (err) {
       console.error("Activation error:", err);
       alert("An error occurred while processing your activation.");
+    } finally {
+      setIsActivating(false);
     }
   };
 
@@ -700,10 +705,11 @@ const BrandDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: stri
           <h2 className="text-3xl font-bold text-zinc-900 tracking-tight">Brand Dashboard</h2>
           <div className="flex items-center gap-3 mt-2">
             <select 
-              value={selectedBrand?.id} 
+              value={selectedBrand?.id || ""} 
               onChange={(e) => setSelectedBrand(brands.find(b => b.id === e.target.value) || null)}
               className="bg-zinc-100 border-none rounded-lg px-3 py-1 text-sm font-medium outline-none"
             >
+              {brands.length === 0 && <option value="">No Brands Found</option>}
               {brands.map(b => <option key={b.id} value={b.id}>{b.companyName}</option>)}
             </select>
             <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${
@@ -729,9 +735,9 @@ const BrandDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: stri
             </button>
           </div>
 
-          {selectedBrand?.subscriptionStatus === 'inactive' ? (
+          {(!selectedBrand || selectedBrand.subscriptionStatus === 'inactive') ? (
             <button 
-              onClick={handleActivate}
+              onClick={() => setShowPayModal(true)}
               className="bg-emerald-600 text-white px-6 py-3 rounded-full font-semibold hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-lg shadow-emerald-200"
             >
               <Wallet size={20} /> Pay Monthly Fee (₦10,000)
@@ -767,14 +773,14 @@ const BrandDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: stri
         </div>
       )}
 
-      {selectedBrand?.subscriptionStatus === 'inactive' && (
+      {(!selectedBrand || selectedBrand.subscriptionStatus === 'inactive') && (
         <div className="bg-amber-50 border border-amber-200 rounded-3xl p-8 mb-12 text-center">
           <h3 className="text-xl font-bold text-amber-900 mb-2">Subscription Required</h3>
           <p className="text-amber-700 max-w-lg mx-auto">Your account is currently inactive. Please pay the monthly platform fee to manage campaigns and view detailed analytics.</p>
         </div>
       )}
 
-      <div className={`grid grid-cols-1 lg:grid-cols-3 gap-8 ${selectedBrand?.subscriptionStatus === 'inactive' ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
+      <div className={`grid grid-cols-1 lg:grid-cols-3 gap-8 ${(!selectedBrand || selectedBrand.subscriptionStatus === 'inactive') ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
         <div className="lg:col-span-1 space-y-4">
           <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-widest px-2">Your Campaigns</h3>
           {campaigns.map((c) => (
@@ -1116,6 +1122,74 @@ const BrandDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: stri
                     </button>
                   </div>
                 </form>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Subscription Modal */}
+      <AnimatePresence>
+        {showPayModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !isActivating && setShowPayModal(false)}
+              className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
+            >
+              <div className="p-8 text-center">
+                <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                  <Wallet size={32} />
+                </div>
+                <h3 className="text-2xl font-bold text-zinc-900 mb-2">Activate Dashboard</h3>
+                <p className="text-zinc-500 mb-8">Pay the monthly platform fee to start creating campaigns and tracking ROI.</p>
+                
+                <div className="bg-zinc-50 rounded-2xl p-6 mb-8 border border-zinc-100">
+                  <div className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Monthly Subscription</div>
+                  <div className="text-3xl font-black text-zinc-900">₦10,000</div>
+                </div>
+
+                <div className="space-y-3">
+                  <button 
+                    onClick={handleActivate}
+                    disabled={isActivating}
+                    className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200 flex items-center justify-center gap-2 disabled:bg-emerald-400 disabled:cursor-not-allowed"
+                  >
+                    {isActivating ? (
+                      <span className="flex items-center gap-2">
+                        <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                        Initializing...
+                      </span>
+                    ) : (
+                      <>Secure Payment via Paystack</>
+                    )}
+                  </button>
+                  <button 
+                    onClick={() => setShowPayModal(false)}
+                    disabled={isActivating}
+                    className="w-full py-3 rounded-xl font-bold text-zinc-400 hover:text-zinc-600 transition-all disabled:opacity-50"
+                  >
+                    Maybe later
+                  </button>
+                </div>
+                
+                <div className="mt-8 pt-6 border-t border-zinc-50 flex items-center justify-center gap-4 opacity-50 grayscale">
+                  <img src="https://picsum.photos/seed/paystack/100/30" alt="Paystack" className="h-4" referrerPolicy="no-referrer" />
+                  <img src="https://picsum.photos/seed/visa/100/30" alt="Visa" className="h-4" referrerPolicy="no-referrer" />
+                  <img src="https://picsum.photos/seed/mastercard/100/30" alt="Mastercard" className="h-4" referrerPolicy="no-referrer" />
+                </div>
+
+                <p className="mt-4 text-[10px] text-zinc-400 px-4">
+                  By subscribing, you agree to our terms of service. Payments are handled securely through our PCI-compliant processing partner.
+                </p>
               </div>
             </motion.div>
           </div>
@@ -2165,7 +2239,7 @@ export default function App() {
             )}
             {activeView === "brand" && user && (user.role === "BRAND" || user.role === "ADMIN") && (
               <motion.div key="brand" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                <BrandDashboard authenticatedFetch={authenticatedFetch} />
+                <BrandDashboard authenticatedFetch={authenticatedFetch} user={user} />
               </motion.div>
             )}
             {activeView === "influencer" && user && (user.role === "INFLUENCER" || user.role === "ADMIN") && (

@@ -9,20 +9,49 @@ import {
   signInWithEmailAndPassword,
   updateProfile
 } from "firebase/auth";
-import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, getDocFromServer, serverTimestamp } from "firebase/firestore";
+import { 
+  getFirestore, 
+  collection, 
+  doc, 
+  getDoc, 
+  getDocs, 
+  setDoc, 
+  updateDoc, 
+  deleteDoc, 
+  onSnapshot, 
+  query, 
+  where, 
+  orderBy, 
+  getDocFromServer, 
+  serverTimestamp,
+  initializeFirestore
+} from "firebase/firestore";
 import firebaseConfig from "@/firebase-applet-config.json";
 
 // Initialize Firebase
 console.log("Initializing Firebase with Project ID:", firebaseConfig.projectId);
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+// Use initializeFirestore with settings to enable long polling for stable connection in iframes/sandboxes
+export const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true,
+}, firebaseConfig.firestoreDatabaseId);
 
 // Auth Providers
 export const googleProvider = new GoogleAuthProvider();
 
 // Auth Helpers
-export const loginWithGoogle = () => signInWithPopup(auth, googleProvider);
+let isLoggingIn = false;
+export const loginWithGoogle = async () => {
+  if (isLoggingIn) return;
+  isLoggingIn = true;
+  try {
+    return await signInWithPopup(auth, googleProvider);
+  } finally {
+    isLoggingIn = false;
+  }
+};
 export const logout = () => signOut(auth);
 export const registerWithEmail = (email: string, pass: string) => createUserWithEmailAndPassword(auth, email, pass);
 export const loginWithEmail = (email: string, pass: string) => signInWithEmailAndPassword(auth, email, pass);
