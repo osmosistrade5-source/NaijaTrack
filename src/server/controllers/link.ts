@@ -3,6 +3,7 @@ import { getAdminDb } from "../config/firebase-admin";
 import { AuthRequest } from "../middleware/auth";
 import admin from "firebase-admin";
 import { nanoid } from "nanoid";
+import { broadcast } from "../utils/websocket";
 
 export const createLink = async (req: AuthRequest, res: Response) => {
   const { campaignId } = req.body;
@@ -165,6 +166,7 @@ export const confirmConversion = async (req: AuthRequest, res: Response) => {
     }
 
     const campaignData = campaignSnap.data()!;
+    const payoutAmount = campaignData.payout_per_lead || 0;
 
     // Verify the brand owns the campaign
     const brandQuery = await adminDb.collection("brands").where("userId", "==", req.user!.id).limit(1).get();
@@ -172,25 +174,81 @@ export const confirmConversion = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ error: "Unauthorized" });
     }
 
+    const brandDoc = brandQuery.docs[0];
+    const brandData = brandDoc.data();
+
+    // Check if brand has enough budget
+    if (brandData.balance < payoutAmount) {
+      return res.status(400).json({ error: "Insufficient campaign funds to confirm this sale." });
+    }
+
+    const influencerId = linkData.influencerId;
+    const influencerSnap = await adminDb.collection("influencers").doc(influencerId).get();
+    const influencerUserDataSnap = await adminDb.collection("users").doc(influencerId).get();
+    const influencerName = influencerUserDataSnap.data()?.name || "Influencer";
+
     await adminDb.runTransaction(async (transaction) => {
-      // Increment conversion count
+      // 1. Increment conversion count on link
       transaction.update(linkRef, {
         conversionCount: admin.firestore.FieldValue.increment(1)
       });
 
-      // Create a task for payout
+      // 2. Deduct from Brand balance
+      transaction.update(brandDoc.ref, {
+        balance: admin.firestore.FieldValue.increment(-payoutAmount)
+      });
+
+      // 3. Add to Influencer wallet balance
+      transaction.update(influencerSnap.ref, {
+        walletBalance: admin.firestore.FieldValue.increment(payoutAmount)
+      });
+
+      // 4. Create Transaction record for the brand (debit)
+      const brandTransactionRef = adminDb.collection("transactions").doc();
+      transaction.set(brandTransactionRef, {
+        userId: req.user!.id,
+        type: "CAMPAIGN_PAYOUT",
+        amount: payoutAmount,
+        campaignId: linkData.campaignId,
+        influencerId: linkData.influencerId,
+        status: "SUCCESS",
+        createdAt: new Date().toISOString()
+      });
+
+      // 5. Create Transaction record for the influencer (credit)
+      const influencerTransactionRef = adminDb.collection("transactions").doc();
+      transaction.set(influencerTransactionRef, {
+        userId: influencerId,
+        type: "CAMPAIGN_EARNING",
+        amount: payoutAmount,
+        campaignId: linkData.campaignId,
+        brandId: brandDoc.id,
+        status: "SUCCESS",
+        createdAt: new Date().toISOString()
+      });
+      
+      // 6. Record the conversion 'task' for history
       const taskRef = adminDb.collection("campaigns").doc(linkData.campaignId).collection("tasks").doc();
       transaction.set(taskRef, {
         campaignId: linkData.campaignId,
         influencerId: linkData.influencerId,
         shortCode,
-        status: "COMPLETED", // Ready for admin approval
-        amount: campaignData.payout_per_lead,
+        status: "APPROVED",
+        amount: payoutAmount,
         createdAt: new Date().toISOString()
       });
     });
 
-    res.json({ success: true, message: "Conversion confirmed" });
+    // Notify the influencer via WebSocket
+    broadcast({
+      type: "CONVERSION",
+      influencer_id: influencerId,
+      influencer_name: influencerName,
+      campaign_title: campaignData.title,
+      amount: payoutAmount
+    });
+
+    res.json({ success: true, message: "Sale confirmed! Payout processed instantly." });
   } catch (error) {
     console.error("Confirm conversion error:", error);
     res.status(500).json({ error: "Internal server error" });

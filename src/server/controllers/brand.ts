@@ -1,7 +1,7 @@
 import { Response } from "express";
 import { getAdminDb } from "../config/firebase-admin";
 import { AuthRequest } from "../middleware/auth";
-import { initializeTransaction } from "../utils/paystack";
+import { initializeTransaction, verifyTransaction } from "../utils/paystack";
 import admin from "firebase-admin";
 
 export const getBrandWallet = async (req: AuthRequest, res: Response) => {
@@ -56,6 +56,7 @@ export const initializeActivation = async (req: AuthRequest, res: Response) => {
 
 export const subscribeBrand = async (req: AuthRequest, res: Response) => {
   const fee = 10000;
+  const { reference } = req.body;
   try {
     const adminDb = getAdminDb();
     const brandsRef = adminDb.collection("brands");
@@ -66,8 +67,37 @@ export const subscribeBrand = async (req: AuthRequest, res: Response) => {
     const brandDoc = brandQuery.docs[0];
     const brandData = brandDoc.data();
 
+    if (reference) {
+      // Direct Pay via Paystack reference
+      const verification = await verifyTransaction(reference);
+      if (verification.status !== true || verification.data.status !== "success") {
+        return res.status(400).json({ error: "Payment verification failed" });
+      }
+      
+      const paidAmount = verification.data.amount / 100;
+      if (paidAmount < fee) {
+        return res.status(400).json({ error: "Insufficient payment amount" });
+      }
+
+      await adminDb.runTransaction(async (transaction) => {
+        transaction.update(brandDoc.ref, {
+          subscriptionStatus: "active"
+        });
+        
+        const adminWalletRef = adminDb.collection("admin_wallets").doc("main");
+        transaction.update(adminWalletRef, {
+          totalEarnings: admin.firestore.FieldValue.increment(fee),
+          subscriptionRevenue: admin.firestore.FieldValue.increment(fee),
+          updatedAt: new Date().toISOString()
+        });
+      });
+      
+      return res.json({ success: true });
+    }
+
+    // Fallback: Charge from existing Campaign Funds balance
     if (brandData.balance < fee) {
-      return res.status(400).json({ error: "Insufficient balance for subscription" });
+      return res.status(400).json({ error: "Insufficient balance for subscription. Please use the 'Pay Monthly Fee' button to pay via card." });
     }
 
     await adminDb.runTransaction(async (transaction) => {

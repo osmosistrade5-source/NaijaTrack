@@ -36,6 +36,7 @@ export const auth = getAuth(app);
 // Use initializeFirestore with settings to enable long polling for stable connection in iframes/sandboxes
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
+  ignoreUndefinedProperties: true,
 }, firebaseConfig.firestoreDatabaseId);
 
 // Auth Providers
@@ -68,7 +69,8 @@ async function testConnection() {
         if (e.message?.includes('permission-denied') || e.code === 'permission-denied') {
           console.log("Firestore connection check (Public Test) failed with permission-denied (Expected if rules are locked).");
         } else {
-          await getDocFromServer(doc(db, 'users', 'test', 'connection'));
+          // Document references must have even segments. 'users/test-connection' has 2.
+          await getDocFromServer(doc(db, 'users', 'connection-test'));
         }
       }
       console.log("Firestore connection successful");

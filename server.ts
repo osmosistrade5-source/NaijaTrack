@@ -9,6 +9,7 @@ import dotenv from "dotenv";
 import { getAdminDb } from "./src/server/config/firebase-admin";
 import apiRoutes from "./src/server/routes/index";
 import { trackClick } from "./src/server/controllers/link";
+import { registerClient } from "./src/server/utils/websocket";
 
 dotenv.config();
 
@@ -46,20 +47,9 @@ async function startServer() {
   await seedAdmin();
 
   // WebSocket connection handling
-  const clients = new Set<WebSocket>();
   wss.on("connection", (ws) => {
-    clients.add(ws);
-    ws.on("close", () => clients.delete(ws));
+    registerClient(ws);
   });
-
-  const broadcast = (data: any) => {
-    const message = JSON.stringify(data);
-    clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(message);
-      }
-    });
-  };
 
   // API Routes
   app.use("/api", apiRoutes);

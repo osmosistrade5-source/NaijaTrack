@@ -1,95 +1,64 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import React, { useState, useEffect, Component, ErrorInfo, ReactNode } from "react";
-import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  LineChart, Line, PieChart, Pie, Cell
-} from "recharts";
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Megaphone, 
   Users, 
-  Link as LinkIcon, 
-  CheckCircle, 
   TrendingUp, 
+  ShieldCheck, 
+  ArrowRight, 
+  ArrowUpRight, 
   Plus, 
-  MessageSquare,
-  ArrowRight,
-  ArrowUpRight,
-  ChevronRight,
-  Globe,
-  ShieldCheck,
-  Smartphone,
-  Bell,
+  Link as LinkIcon, 
+  Copy, 
+  CheckCircle2, 
+  Globe, 
+  Smartphone, 
+  MessageSquare, 
+  Bell, 
   Wallet,
-  ArrowDownCircle,
+  LogOut,
+  ChevronRight,
   History,
-  LayoutDashboard,
-  CreditCard,
   Banknote,
-  Calendar,
-  Percent,
-  ShieldAlert,
-  LifeBuoy,
-  Settings,
-  ChevronDown,
-  LogOut
-} from "lucide-react";
-import { motion, AnimatePresence } from "motion/react";
-import { auth, loginWithGoogle, logout, db, registerWithEmail, loginWithEmail } from "./lib/firebase";
-import { onAuthStateChanged, updateProfile } from "firebase/auth";
-import { doc, getDoc, setDoc, onSnapshot, collection, serverTimestamp, query, where, getDocs } from "firebase/firestore";
-
-// --- Error Boundary ---
-interface ErrorBoundaryProps {
-  children: ReactNode;
-}
-
-interface ErrorBoundaryState {
-  hasError: boolean;
-  error: Error | null;
-}
-
-class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error("Uncaught error:", error, errorInfo);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="min-h-screen flex items-center justify-center bg-zinc-50 p-4">
-          <div className="max-w-md w-full bg-white rounded-3xl shadow-xl p-8 border border-zinc-200 text-center">
-            <div className="w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
-              <ShieldAlert size={32} />
-            </div>
-            <h2 className="text-2xl font-bold text-zinc-900 mb-4">Something went wrong</h2>
-            <p className="text-zinc-500 mb-8">We encountered an error. Please try refreshing the page or contact support.</p>
-            <button 
-              onClick={() => window.location.reload()}
-              className="w-full bg-zinc-900 text-white py-4 rounded-xl font-bold hover:bg-zinc-800 transition-all"
-            >
-              Refresh Page
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    return this.props.children;
-  }
-}
+  ArrowDownCircle,
+  CreditCard,
+  Target,
+  BarChart3,
+  Layers,
+  ShieldAlert
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  AreaChart,
+  Area
+} from 'recharts';
+import { 
+  onAuthStateChanged, 
+  signOut,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithEmailAndPassword
+} from 'firebase/auth';
+import { 
+  getDoc, 
+  doc, 
+  setDoc, 
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  updateDoc 
+} from 'firebase/firestore';
+import { usePaystackPayment } from 'react-paystack';
+import { auth, db } from './lib/firebase';
 
 // --- Types ---
 
@@ -102,31 +71,83 @@ enum OperationType {
   WRITE = 'write',
 }
 
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: 'ADMIN' | 'BRAND' | 'INFLUENCER';
+}
+
+interface Campaign {
+  id: string;
+  brandId: string;
+  title: string;
+  description: string;
+  budget: number;
+  payout_per_lead: number;
+  wa_number: string;
+  created_at: string;
+}
+
+interface Brand {
+  id: string;
+  userId: string;
+  companyName: string;
+  balance: number;
+  subscriptionStatus: 'active' | 'inactive';
+}
+
+interface Influencer {
+  id: string;
+  userId: string;
+  name: string;
+  walletBalance: number;
+}
+
+interface CampaignStat {
+  influencer_name: string;
+  short_code: string;
+  click_count: number;
+  conversion_count: number;
+}
+
 interface FirestoreErrorInfo {
   error: string;
   operationType: OperationType;
   path: string | null;
-  authInfo: {
-    userId: string | undefined;
-    email: string | null | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-    tenantId: string | null | undefined;
-    providerInfo: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
+  authInfo: any;
+}
+
+// --- Error Handling ---
+
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  render() {
+    if (this.state.hasError) return <div className="p-8 text-center bg-zinc-50 min-h-screen flex flex-col items-center justify-center">
+      <h2 className="text-2xl font-bold mb-4">Something went wrong.</h2>
+      <button onClick={() => window.location.reload()} className="bg-emerald-600 text-white px-6 py-2 rounded-xl">Reload Application</button>
+    </div>;
+    return this.props.children;
   }
 }
 
 function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const isPermissionError = error instanceof Error && 
-    (error.message.includes('permission-denied') || error.message.includes('Missing or insufficient permissions'));
+  const errorMessage = error instanceof Error ? error.message : String(error);
   
+  const isPermissionError = error instanceof Error && 
+    (errorMessage.includes('permission-denied') || errorMessage.includes('Missing or insufficient permissions'));
+  
+  const isOfflineError = errorMessage.includes('the client is offline') || 
+                        errorMessage.includes('Failed to get document because the client is offline');
+
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errorMessage,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -144,232 +165,18 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     path
   }
   
-  if (isPermissionError) {
-    console.warn(`Firestore Permission Denied (Handled): ${operationType} at ${path}`);
-    return null; // Return null instead of throwing for permission errors
+  if (isPermissionError || isOfflineError) {
+    if (isOfflineError) {
+      console.warn(`Firestore Offline (Graceful Fallback): ${operationType} at ${path}. Using cached data or local state.`);
+    } else {
+      console.warn(`Firestore Permission Denied (Handled): ${operationType} at ${path}`);
+    }
+    return null;
   }
   
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
-
-interface Campaign {
-  id: string;
-  brand_id: string;
-  title: string;
-  description: string;
-  budget: number;
-  payout_per_lead: number;
-  wa_number: string;
-  created_at: string;
-}
-
-interface Influencer {
-  id: string;
-  name: string;
-  handle: string;
-  platform: string;
-}
-
-interface CampaignStat {
-  influencer_name: string;
-  short_code: string;
-  click_count: number;
-  conversion_count: number;
-}
-
-interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: 'ADMIN' | 'BRAND' | 'INFLUENCER';
-}
-
-interface Brand {
-  id: string;
-  companyName: string;
-  subscriptionStatus: 'active' | 'inactive';
-  balance: number;
-}
-
-const Auth = ({ intendedRole, onAuthSuccess }: { intendedRole: 'BRAND' | 'INFLUENCER' | null, onAuthSuccess: () => void }) => {
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [mode, setMode] = useState<'login' | 'signup'>('signup');
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-
-  const handleGoogleLogin = async () => {
-    console.log("Starting Google Login...");
-    setLoading(true);
-    setError("");
-    try {
-      const result = await loginWithGoogle();
-      console.log("Login successful:", result.user.email);
-      onAuthSuccess();
-    } catch (err: any) {
-      console.error("Login error details:", err);
-      setError(`${err.code || "Error"}: ${err.message || "Authentication failed"}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleEmailAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError("");
-    const trimmedEmail = email.trim();
-    try {
-      if (mode === 'signup') {
-        const result = await registerWithEmail(trimmedEmail, password);
-        if (result.user) {
-          await updateProfile(result.user, { displayName: name });
-        }
-      } else {
-        await loginWithEmail(trimmedEmail, password);
-      }
-      onAuthSuccess();
-    } catch (err: any) {
-      console.error("Email auth error:", err);
-      const errorCode = err.code;
-      if (errorCode === 'auth/operation-not-allowed') {
-        setError("Email/Password sign-in is not enabled. Please go to Firebase Console > Authentication > Sign-in method and enable 'Email/Password'.");
-      } else if (errorCode === 'auth/email-already-in-use') {
-        setError("This email is already registered. Try signing in instead.");
-      } else if (errorCode === 'auth/weak-password') {
-        setError("Password is too weak. Please use at least 6 characters.");
-      } else if (errorCode === 'auth/invalid-email') {
-        setError("Please enter a valid email address.");
-      } else if (errorCode === 'auth/user-not-found' || errorCode === 'auth/wrong-password' || errorCode === 'auth/invalid-credential') {
-        // Check if user exists in Firestore but maybe not in Auth
-        try {
-          const usersRef = collection(db, "users");
-          const q = query(usersRef, where("email", "==", trimmedEmail));
-          const querySnapshot = await getDocs(q);
-          if (!querySnapshot.empty) {
-            setError("Invalid password. If you signed up with Google, please use the Google button. If you haven't set a password yet, you might need to Sign Up first.");
-          } else {
-            setError("Invalid email or password. This email doesn't seem to be registered. Please check for typos or Sign Up.");
-          }
-        } catch (fsErr) {
-          console.error("Error checking Firestore for user:", fsErr);
-          setError("Invalid email or password. If you signed up with Google, please use the Google button.");
-        }
-      } else {
-        setError(`${errorCode || "Error"}: ${err.message || "Authentication failed."}`);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-zinc-50 px-4 py-12">
-      <div className="max-w-md w-full bg-white rounded-[40px] shadow-2xl p-10 border border-zinc-100">
-        <div className="text-center mb-10">
-          <div className="w-16 h-16 bg-emerald-600 rounded-3xl flex items-center justify-center text-white font-bold text-3xl mx-auto mb-6 shadow-lg shadow-emerald-200">N</div>
-          <h2 className="text-3xl font-bold text-zinc-900 tracking-tight">
-            {mode === 'signup' 
-              ? (intendedRole ? `Join as a ${intendedRole === 'BRAND' ? 'Brand' : 'Influencer'}` : 'Join NaijaTrack')
-              : 'Welcome Back'}
-          </h2>
-          <p className="text-zinc-500 mt-3 text-sm">
-            {mode === 'signup' 
-              ? (intendedRole 
-                  ? `Start tracking your ${intendedRole === 'BRAND' ? 'campaigns' : 'earnings'} today.` 
-                  : 'Start your performance marketing journey today.')
-              : 'Sign in to manage your account.'}
-          </p>
-        </div>
-
-        <div className="space-y-6">
-          <button
-            onClick={handleGoogleLogin}
-            disabled={loading}
-            className="w-full flex items-center justify-center gap-3 bg-white border border-zinc-200 text-zinc-700 py-4 rounded-2xl font-bold hover:bg-zinc-50 transition-all shadow-sm disabled:opacity-50"
-          >
-            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-6 h-6" />
-            {loading ? "Connecting..." : "Continue with Google"}
-          </button>
-
-          <div className="relative flex items-center py-2">
-            <div className="flex-grow border-t border-zinc-100"></div>
-            <span className="flex-shrink mx-4 text-zinc-400 text-[10px] font-bold uppercase tracking-widest">or use email</span>
-            <div className="flex-grow border-t border-zinc-100"></div>
-          </div>
-
-          <form onSubmit={handleEmailAuth} className="space-y-4">
-            {mode === 'signup' && (
-              <div>
-                <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2 ml-1">Full Name</label>
-                <input 
-                  required
-                  type="text"
-                  placeholder="John Doe"
-                  className="w-full px-5 py-4 rounded-2xl border border-zinc-100 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all"
-                  value={name}
-                  onChange={e => setName(e.target.value)}
-                />
-              </div>
-            )}
-            <div>
-              <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2 ml-1">Email Address</label>
-              <input 
-                required
-                type="email"
-                placeholder="name@company.com"
-                className="w-full px-5 py-4 rounded-2xl border border-zinc-100 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2 ml-1">Password</label>
-              <input 
-                required
-                type="password"
-                placeholder="••••••••"
-                className="w-full px-5 py-4 rounded-2xl border border-zinc-100 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-zinc-900 text-white py-4 rounded-2xl font-bold hover:bg-zinc-800 transition-all shadow-xl shadow-zinc-200 disabled:opacity-50"
-            >
-              {loading ? "Processing..." : (mode === 'signup' ? "Create Account" : "Sign In")}
-            </button>
-          </form>
-
-          {error && (
-            <div className="p-4 bg-red-50 text-red-600 rounded-2xl text-xs font-medium border border-red-100">
-              {error}
-            </div>
-          )}
-
-          <div className="text-center">
-            <button 
-              onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}
-              className="text-sm font-bold text-emerald-600 hover:text-emerald-700 transition-colors"
-            >
-              {mode === 'login' ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
-            </button>
-          </div>
-        </div>
-
-        <div className="mt-10 pt-8 border-t border-zinc-100 text-center">
-          <p className="text-[10px] text-zinc-400 leading-relaxed uppercase tracking-tight">
-            Secure authentication powered by Firebase
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 const Navbar = ({ activeView, setActiveView, user, onLogout }: { activeView: string, setActiveView: (v: string) => void, user: User | null, onLogout: () => void }) => (
   <nav className="border-b border-zinc-200 bg-white sticky top-0 z-50">
@@ -386,7 +193,7 @@ const Navbar = ({ activeView, setActiveView, user, onLogout }: { activeView: str
             { id: "analytics", label: "Analytics", icon: TrendingUp, roles: ["ADMIN", "BRAND", "INFLUENCER", "PUBLIC"] },
             { id: "admin", label: "Admin", icon: ShieldCheck, roles: ["ADMIN"] },
           ].filter(item => {
-            if (item.id === "analytics") return true; // Always show analytics
+            if (item.id === "analytics") return true; 
             return user && item.roles.includes(user.role);
           }).map((item) => (
             <button
@@ -417,7 +224,14 @@ const Navbar = ({ activeView, setActiveView, user, onLogout }: { activeView: str
                 Logout
               </button>
             </div>
-          ) : null}
+          ) : (
+            <button 
+              onClick={() => setActiveView("auth")}
+              className="bg-zinc-900 text-white px-6 py-2 rounded-xl text-sm font-bold"
+            >
+              Sign In
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -495,28 +309,115 @@ const LandingPage = ({ onStart }: { onStart: (view: string, role?: 'BRAND' | 'IN
           </motion.div>
         ))}
       </div>
-
-      {/* Landing Page Bottom CTA */}
-      <div className="mt-40 p-12 md:p-20 bg-zinc-900 rounded-[48px] text-center text-white relative overflow-hidden">
-        <div className="absolute top-0 right-0 p-12 opacity-5 rotate-12">
-          <TrendingUp size={200} />
-        </div>
-        <div className="relative z-10 max-w-2xl mx-auto">
-          <h2 className="text-3xl md:text-5xl font-bold mb-8">Ready to grow your revenue?</h2>
-          <p className="text-zinc-400 text-lg md:text-xl mb-12">
-            Experience the future of performance tracking. Direct, transparent, and built for building trust.
-          </p>
-          <button 
-            onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-            className="bg-emerald-500 hover:bg-emerald-400 text-black px-12 py-6 rounded-2xl font-black text-xl transition-all shadow-2xl shadow-emerald-500/25"
-          >
-            Get Started Now
-          </button>
-        </div>
-      </div>
     </div>
   </div>
 );
+
+const Auth = ({ intendedRole, onAuthSuccess }: { intendedRole: 'BRAND' | 'INFLUENCER' | null, onAuthSuccess: () => void }) => {
+  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    try {
+      if (mode === 'signup') {
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password, name, role: intendedRole || 'INFLUENCER' })
+        });
+        if (!res.ok) throw new Error(await res.text());
+      }
+      await signInWithEmailAndPassword(auth, email, password);
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setError('');
+    try {
+      const provider = new GoogleAuthProvider();
+      // Ensure role is selected for new accounts
+      if (intendedRole) {
+         // This is a simplified check, usually you'd handle role assignment properly on server-side
+         // after the first Google login if the user doesn't exist yet.
+      }
+      await signInWithPopup(auth, provider);
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <div className="max-w-md mx-auto mt-24 bg-white p-12 rounded-[40px] border border-zinc-100 shadow-xl">
+      <h2 className="text-3xl font-bold mb-8">{mode === 'login' ? 'Welcome Back' : 'Create Account'}</h2>
+      
+      {error && (
+        <div className="bg-red-50 text-red-600 p-4 rounded-xl text-sm mb-6 border border-red-100">
+          {error}
+        </div>
+      )}
+
+      <form onSubmit={handleAuth} className="space-y-4">
+        {mode === 'signup' && (
+          <input 
+            className="w-full px-6 py-4 rounded-xl border border-zinc-200 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all" 
+            placeholder="Full Name" 
+            value={name} 
+            onChange={e => setName(e.target.value)} 
+          />
+        )}
+        <input 
+          className="w-full px-6 py-4 rounded-xl border border-zinc-200 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all" 
+          placeholder="Email" 
+          value={email} 
+          onChange={e => setEmail(e.target.value)} 
+        />
+        <input 
+          type="password" 
+          className="w-full px-6 py-4 rounded-xl border border-zinc-200 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all" 
+          placeholder="Password" 
+          value={password} 
+          onChange={e => setPassword(e.target.value)} 
+        />
+        <button className="w-full bg-zinc-900 text-white py-4 rounded-xl font-bold hover:bg-zinc-800 transition-all">
+          {mode === 'login' ? 'Sign In' : 'Sign Up'}
+        </button>
+      </form>
+
+      <div className="relative my-8">
+        <div className="absolute inset-0 flex items-center">
+          <div className="w-full border-t border-zinc-100"></div>
+        </div>
+        <div className="relative flex justify-center text-xs uppercase">
+          <span className="bg-white px-4 text-zinc-400 font-bold tracking-widest">Or continue with</span>
+        </div>
+      </div>
+
+      <button 
+        onClick={handleGoogleSignIn}
+        className="w-full bg-white border border-zinc-200 text-zinc-900 py-4 rounded-xl font-bold flex items-center justify-center gap-3 hover:bg-zinc-50 transition-all"
+      >
+        <svg className="w-5 h-5" viewBox="0 0 24 24">
+          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+        </svg>
+        Google Account
+      </button>
+
+      <button onClick={() => setMode(mode === 'login' ? 'signup' : 'login')} className="mt-8 w-full text-center text-emerald-600 text-sm font-bold hover:text-emerald-700 transition-colors">
+        {mode === 'login' ? "Don't have an account? Sign up" : "Already have an account? Login"}
+      </button>
+    </div>
+  );
+};
 
 const BrandDashboard = ({ authenticatedFetch, user }: { authenticatedFetch: (url: string, options?: RequestInit) => Promise<Response>, user: User }) => {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -538,6 +439,18 @@ const BrandDashboard = ({ authenticatedFetch, user }: { authenticatedFetch: (url
     payout_per_lead: 1000,
     wa_number: "234"
   });
+  const [confirmCode, setConfirmCode] = useState("");
+  const [isConfirming, setIsConfirming] = useState(false);
+
+  // Paystack Config
+  const paystackConfig = {
+    reference: `SUB-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+    email: user.email,
+    amount: 10000 * 100, // ₦10,000 in kobo
+    publicKey: (import.meta as any).env.VITE_PAYSTACK_PUBLIC_KEY || '',
+  };
+
+  const initializePayment = usePaystackPayment(paystackConfig);
 
   useEffect(() => {
     fetchBrands();
@@ -570,13 +483,9 @@ const BrandDashboard = ({ authenticatedFetch, user }: { authenticatedFetch: (url
             if (updated) setSelectedBrand(updated);
           }
         }
-      } else {
-        console.error("Fetch brands error: Expected array, got", data);
-        setBrands([]);
       }
     } catch (err) {
       console.error("Fetch brands error:", err);
-      setBrands([]);
     }
   };
 
@@ -586,48 +495,9 @@ const BrandDashboard = ({ authenticatedFetch, user }: { authenticatedFetch: (url
       const data = await res.json();
       if (Array.isArray(data)) {
         setCampaigns(data.filter((c: any) => c.brandId === selectedBrand?.id));
-      } else {
-        console.error("Fetch campaigns error: Expected array, got", data);
-        setCampaigns([]);
       }
     } catch (err) {
       console.error("Fetch campaigns error:", err);
-      setCampaigns([]);
-    }
-  };
-
-  const handleActivate = async () => {
-    if (!selectedBrand) return;
-    setIsActivating(true);
-    try {
-      const res = await authenticatedFetch(`/api/brands/activate`, { method: "POST" });
-      const data = await res.json();
-      if (data.authorization_url) {
-        window.location.href = data.authorization_url;
-      } else {
-        alert("Failed to initialize payment: " + (data.error || "Unknown error"));
-      }
-    } catch (err) {
-      console.error("Activation error:", err);
-      alert("An error occurred while processing your activation.");
-    } finally {
-      setIsActivating(false);
-    }
-  };
-
-  const handleSubscribe = async () => {
-    if (!selectedBrand) return;
-    try {
-      const res = await authenticatedFetch(`/api/brands/${selectedBrand.id}/subscribe`, { method: "POST" });
-      if (res.ok) {
-        await fetchBrands();
-      } else {
-        const error = await res.json();
-        alert("Subscription failed: " + (error.error || "Unknown error"));
-      }
-    } catch (err) {
-      console.error("Subscription error:", err);
-      alert("An error occurred while processing your subscription.");
     }
   };
 
@@ -637,13 +507,9 @@ const BrandDashboard = ({ authenticatedFetch, user }: { authenticatedFetch: (url
       const data = await res.json();
       if (Array.isArray(data)) {
         setAllInfluencers(data);
-      } else {
-        console.error("Fetch influencers error: Expected array, got", data);
-        setAllInfluencers([]);
       }
     } catch (err) {
       console.error("Fetch influencers error:", err);
-      setAllInfluencers([]);
     }
   };
 
@@ -653,36 +519,35 @@ const BrandDashboard = ({ authenticatedFetch, user }: { authenticatedFetch: (url
     setStats(data);
   };
 
-  const handleAssign = async (influencerId: string) => {
-    if (!selectedCampaign) return;
-    const res = await authenticatedFetch("/api/links", {
-      method: "POST",
-      body: JSON.stringify({ campaignId: selectedCampaign.id, influencerId })
-    });
-    if (res.ok) {
-      fetchStats(selectedCampaign.id);
-      setShowAssign(false);
-    }
-  };
-
-  const handleConfirmSale = async (shortCode: string) => {
-    if (!selectedCampaign) return;
-    const res = await authenticatedFetch(`/api/links/${shortCode}/convert`, {
-      method: "POST"
-    });
-    if (res.ok) {
-      fetchStats(selectedCampaign.id);
-      fetchBrands(); // Update balance
-      alert("Sale confirmed! Payout task created for admin approval.");
+  const handleConfirmSale = async (shortCodeToConfirm?: string) => {
+    const code = shortCodeToConfirm || confirmCode;
+    if (!code) return;
+    
+    setIsConfirming(true);
+    try {
+      const res = await authenticatedFetch(`/api/links/${code}/convert`, {
+        method: "POST"
+      });
+      const data = await res.json();
+      
+      if (res.ok) {
+        if (selectedCampaign) fetchStats(selectedCampaign.id);
+        fetchBrands(); // Update balance
+        setConfirmCode("");
+        alert("Sale confirmed! The influencer has been paid instantly via escrow.");
+      } else {
+        alert(data.error || "Failed to confirm sale. Please check the reference code.");
+      }
+    } catch (err) {
+      console.error("Confirm conversion error:", err);
+    } finally {
+      setIsConfirming(false);
     }
   };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedBrand?.id) {
-      alert("Please select a brand first");
-      return;
-    }
+    if (!selectedBrand?.id) return;
     const res = await authenticatedFetch("/api/campaigns", {
       method: "POST",
       body: JSON.stringify({ ...newCampaign, brand_id: selectedBrand.id })
@@ -707,8 +572,46 @@ const BrandDashboard = ({ authenticatedFetch, user }: { authenticatedFetch: (url
     }
   };
 
+  const handlePaystackSuccess = async (referenceObj: any) => {
+    try {
+      setIsActivating(true);
+      // We can pass the reference to the server to verify and activate
+      const res = await authenticatedFetch("/api/brands/subscribe", {
+        method: "POST",
+        body: JSON.stringify({ reference: referenceObj.reference })
+      });
+      if (res.ok) {
+        alert("Subscription successful! Your account is now active.");
+        fetchBrands();
+      } else {
+        const data = await res.json();
+        alert(data.error || "Payment successful, but subscription activation failed. Please contact support.");
+      }
+    } catch (err) {
+      console.error("Subscription error:", err);
+    } finally {
+      setIsActivating(false);
+    }
+  };
+
+  const handlePaystackClose = () => {
+    console.log("Paystack dialog closed");
+  };
+
+  const handlePayMonthlyFee = () => {
+    if (!paystackConfig.publicKey || paystackConfig.publicKey === 'your_paystack_public_key') {
+      alert("Paystack Public Key is not configured. Please add VITE_PAYSTACK_PUBLIC_KEY to your environment.");
+      return;
+    }
+    initializePayment({
+        onSuccess: handlePaystackSuccess,
+        onClose: handlePaystackClose
+    });
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 mb-12">
         <div>
           <h2 className="text-3xl font-bold text-zinc-900 tracking-tight">Brand Dashboard</h2>
@@ -718,7 +621,6 @@ const BrandDashboard = ({ authenticatedFetch, user }: { authenticatedFetch: (url
               onChange={(e) => setSelectedBrand(brands.find(b => b.id === e.target.value) || null)}
               className="bg-zinc-100 border-none rounded-lg px-3 py-1 text-sm font-medium outline-none"
             >
-              {brands.length === 0 && <option value="">No Brands Found</option>}
               {brands.map(b => <option key={b.id} value={b.id}>{b.companyName}</option>)}
             </select>
             <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${
@@ -726,480 +628,227 @@ const BrandDashboard = ({ authenticatedFetch, user }: { authenticatedFetch: (url
             }`}>
               {selectedBrand?.subscriptionStatus || 'inactive'}
             </span>
+            {selectedBrand?.subscriptionStatus !== 'active' && (
+              <button 
+                onClick={handlePayMonthlyFee}
+                disabled={isActivating}
+                className="bg-emerald-600 text-white text-[10px] font-bold px-3 py-1 rounded uppercase tracking-wider hover:bg-emerald-700 transition-colors disabled:opacity-50"
+              >
+                {isActivating ? "Processing..." : "Pay Monthly Fee (₦10,000)"}
+              </button>
+            )}
           </div>
         </div>
-        
-        <div className="flex flex-col md:flex-row items-start md:items-center gap-4">
-          <div className="bg-white px-6 py-3 rounded-2xl border border-zinc-100 shadow-sm flex items-center gap-4">
-            <div>
-              <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Campaign Funds</div>
-              <div className="text-xl font-bold text-zinc-900">₦{selectedBrand?.balance?.toLocaleString() || "0"}</div>
-            </div>
-            <button 
-              onClick={() => setShowDeposit(true)}
-              className="bg-emerald-50 text-emerald-600 p-2 rounded-xl hover:bg-emerald-100 transition-colors"
-              title="Deposit Funds"
-            >
-              <Plus size={20} />
-            </button>
+        <div className="bg-white px-6 py-3 rounded-2xl border border-zinc-100 shadow-sm flex items-center gap-4">
+          <div>
+            <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Campaign Funds</div>
+            <div className="text-xl font-bold text-zinc-900">₦{selectedBrand?.balance?.toLocaleString() || "0"}</div>
           </div>
-
-          {(!selectedBrand || selectedBrand.subscriptionStatus === 'inactive') ? (
-            <button 
-              onClick={() => setShowPayModal(true)}
-              className="bg-emerald-600 text-white px-6 py-3 rounded-full font-semibold hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-lg shadow-emerald-200"
-            >
-              <Wallet size={20} /> Pay Monthly Fee (₦10,000)
-            </button>
-          ) : (
-            <button 
-              onClick={() => setShowCreate(true)}
-              className="bg-zinc-900 text-white px-6 py-3 rounded-full font-semibold hover:bg-zinc-800 transition-all flex items-center gap-2"
-            >
-              <Plus size={20} /> Create Campaign
-            </button>
-          )}
+          <button onClick={() => setShowDeposit(true)} className="bg-emerald-50 text-emerald-600 p-2 rounded-xl">
+            <Plus size={20} />
+          </button>
         </div>
       </div>
 
-      {selectedBrand && selectedBrand.balance < 5000 && selectedBrand.subscriptionStatus === 'active' && (
-        <div className="bg-red-50 border border-red-100 rounded-3xl p-6 mb-8 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center">
-              <ShieldAlert size={24} />
-            </div>
-            <div>
-              <h4 className="font-bold text-red-900">Low Campaign Funds</h4>
-              <p className="text-sm text-red-700">Your balance is low. Influencers will not be paid for new sales if funds are insufficient.</p>
-            </div>
+      {/* Quick Confirmation Portal */}
+      <div className="mb-12">
+        <div className="bg-zinc-900 rounded-[40px] p-8 md:p-12 text-white flex flex-col md:flex-row items-center justify-between gap-8 relative overflow-hidden">
+          <div className="absolute top-0 right-0 p-8 opacity-10">
+            <MessageSquare size={120} />
           </div>
-          <button 
-            onClick={() => setShowDeposit(true)}
-            className="bg-red-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-red-700 transition-all"
-          >
-            Deposit Now
-          </button>
+          <div className="relative z-10">
+            <h3 className="text-2xl font-bold mb-2">WhatsApp Sale Confirmation</h3>
+            <p className="text-zinc-400 max-w-sm text-sm">Paste the "Ref Code" from your customer's WhatsApp message here to trigger an instant influencer payout.</p>
+          </div>
+          <div className="relative z-10 w-full md:w-auto flex flex-col sm:flex-row gap-3">
+            <input 
+              value={confirmCode}
+              onChange={(e) => setConfirmCode(e.target.value.trim())}
+              placeholder="Paste Ref Code (e.g. x7Y2z9)"
+              className="w-full sm:w-64 bg-white/10 border border-white/20 rounded-2xl px-6 py-4 text-white placeholder:text-zinc-500 font-mono"
+            />
+            <button 
+              disabled={!confirmCode || isConfirming}
+              onClick={() => handleConfirmSale()}
+              className="bg-emerald-500 text-black px-8 py-4 rounded-2xl font-black shadow-xl"
+            >
+              {isConfirming ? "Processing..." : "Confirm & Pay Influencer"}
+            </button>
+          </div>
         </div>
-      )}
+      </div>
 
-      {(!selectedBrand || selectedBrand.subscriptionStatus === 'inactive') && (
-        <div className="bg-amber-50 border border-amber-200 rounded-3xl p-8 mb-12 text-center">
-          <h3 className="text-xl font-bold text-amber-900 mb-2">Subscription Required</h3>
-          <p className="text-amber-700 max-w-lg mx-auto">Your account is currently inactive. Please pay the monthly platform fee to manage campaigns and view detailed analytics.</p>
-        </div>
-      )}
-
-      <div className={`grid grid-cols-1 lg:grid-cols-3 gap-8 ${(!selectedBrand || selectedBrand.subscriptionStatus === 'inactive') ? 'opacity-40 pointer-events-none grayscale' : ''}`}>
+      {/* Main Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-1 space-y-4">
-          <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-widest px-2">Your Campaigns</h3>
+          <div className="flex justify-between items-center px-2">
+            <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Your Campaigns</h3>
+            <button 
+              onClick={() => setShowCreate(true)}
+              className="w-8 h-8 flex items-center justify-center bg-zinc-900 text-white rounded-xl hover:bg-zinc-800 transition-all"
+            >
+              <Plus size={18} />
+            </button>
+          </div>
           {campaigns.map((c) => (
             <button
               key={c.id}
               onClick={() => setSelectedCampaign(c)}
               className={`w-full text-left p-6 rounded-3xl border transition-all ${
-                selectedCampaign?.id === c.id 
-                  ? "border-emerald-600 bg-emerald-50/50 shadow-sm" 
-                  : "border-zinc-100 hover:border-zinc-200 bg-white"
+                selectedCampaign?.id === c.id ? "border-emerald-600 bg-emerald-50/50" : "bg-white border-zinc-100"
               }`}
             >
-              <h4 className="font-bold text-zinc-900 mb-1">{c.title}</h4>
-              <p className="text-sm text-zinc-500 line-clamp-1">{c.description}</p>
-              <div className="mt-4 flex justify-between items-center">
-                <span className="text-xs font-bold text-emerald-600">₦{c.payout_per_lead}/lead</span>
-                <span className="text-[10px] text-zinc-400 uppercase tracking-tighter">{new Date(c.created_at).toLocaleDateString()}</span>
-              </div>
+              <h4 className="font-bold text-zinc-900">{c.title}</h4>
+              <p className="text-xs text-zinc-500 line-clamp-1">{c.description}</p>
             </button>
           ))}
+          {campaigns.length === 0 && (
+            <div className="p-8 text-center bg-white rounded-3xl border border-dashed border-zinc-200 text-zinc-400 text-xs">
+              No campaigns yet. Click the + to start.
+            </div>
+          )}
         </div>
 
         <div className="lg:col-span-2">
           {selectedCampaign ? (
-            <motion.div 
-              key={selectedCampaign.id}
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="bg-white p-8 rounded-3xl border border-zinc-100 shadow-sm"
-            >
-              <div className="flex justify-between items-start mb-8">
-                <div>
-                  <h3 className="text-2xl font-bold text-zinc-900 mb-2">{selectedCampaign.title}</h3>
-                  <p className="text-zinc-500">{selectedCampaign.description}</p>
-                </div>
-                <div className="text-right">
-                  <div className="text-sm text-zinc-400 uppercase font-bold tracking-widest mb-1">Total Budget</div>
-                  <div className="text-2xl font-bold text-zinc-900">₦{selectedCampaign.budget.toLocaleString()}</div>
-                </div>
-              </div>
-
+            <div className="bg-white p-8 rounded-3xl border border-zinc-100 shadow-sm">
+              <h3 className="text-2xl font-bold text-zinc-900 mb-8">{selectedCampaign.title}</h3>
+              
               <div className="grid grid-cols-3 gap-6 mb-12">
-                <div className="p-6 rounded-2xl bg-zinc-50 border border-zinc-100">
-                  <div className="text-zinc-400 text-xs font-bold uppercase mb-2">Total Clicks</div>
-                  <div className="text-2xl font-bold text-zinc-900">
-                    {stats.reduce((acc, s) => acc + s.click_count, 0)}
-                  </div>
+                <div className="p-6 rounded-2xl bg-zinc-50">
+                  <div className="text-zinc-400 text-[10px] font-bold uppercase mb-2">Total Clicks</div>
+                  <div className="text-2xl font-bold text-zinc-900">{stats.reduce((acc, s) => acc + s.click_count, 0)}</div>
                 </div>
-                <div className="p-6 rounded-2xl bg-zinc-50 border border-zinc-100">
-                  <div className="text-zinc-400 text-xs font-bold uppercase mb-2">Conversions</div>
-                  <div className="text-2xl font-bold text-emerald-600">
-                    {stats.reduce((acc, s) => acc + s.conversion_count, 0)}
-                  </div>
+                <div className="p-6 rounded-2xl bg-zinc-50">
+                  <div className="text-zinc-400 text-[10px] font-bold uppercase mb-2">Conversions</div>
+                  <div className="text-2xl font-bold text-emerald-600">{stats.reduce((acc, s) => acc + s.conversion_count, 0)}</div>
                 </div>
-                <div className="p-6 rounded-2xl bg-zinc-50 border border-zinc-100">
-                  <div className="text-zinc-400 text-xs font-bold uppercase mb-2">Conversion Rate</div>
-                  <div className="text-2xl font-bold text-zinc-900">
-                    {stats.reduce((acc, s) => acc + s.click_count, 0) > 0 
-                      ? ((stats.reduce((acc, s) => acc + s.conversion_count, 0) / stats.reduce((acc, s) => acc + s.click_count, 0)) * 100).toFixed(1)
-                      : 0}%
-                  </div>
+                <div className="p-6 rounded-2xl bg-zinc-50">
+                  <div className="text-zinc-400 text-[10px] font-bold uppercase mb-2">Payout/Lead</div>
+                  <div className="text-2xl font-bold text-zinc-900">₦{selectedCampaign.payout_per_lead}</div>
                 </div>
-              </div>
-
-              <div className="flex justify-between items-center mb-6">
-                <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-widest">Influencer Performance</h4>
-                <button 
-                  onClick={() => setShowAssign(true)}
-                  className="text-xs font-bold text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
-                >
-                  <Plus size={14} /> Assign Influencer
-                </button>
-              </div>
-              <div className="h-[300px] w-full mb-8">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={stats}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                    <XAxis dataKey="influencer_name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#71717a' }} />
-                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#71717a' }} />
-                    <Tooltip 
-                      contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                      cursor={{ fill: '#f4f4f5' }}
-                    />
-                    <Bar dataKey="click_count" name="Clicks" fill="#10b981" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="conversion_count" name="Sales" fill="#064e3b" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
               </div>
 
               <div className="overflow-hidden rounded-2xl border border-zinc-100">
                 <table className="w-full text-left">
-                  <thead className="bg-zinc-50 border-b border-zinc-100">
+                  <thead className="bg-zinc-50">
                     <tr>
                       <th className="px-6 py-4 text-xs font-bold text-zinc-400 uppercase">Influencer</th>
-                      <th className="px-6 py-4 text-xs font-bold text-zinc-400 uppercase">Short Code</th>
-                      <th className="px-6 py-4 text-xs font-bold text-zinc-400 uppercase text-right">Clicks</th>
                       <th className="px-6 py-4 text-xs font-bold text-zinc-400 uppercase text-right">Sales</th>
                       <th className="px-6 py-4 text-xs font-bold text-zinc-400 uppercase text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-100">
                     {stats.map((s, i) => (
-                      <tr key={i} className="hover:bg-zinc-50/50 transition-colors">
-                        <td className="px-6 py-4 font-medium text-zinc-900">{s.influencer_name}</td>
-                        <td className="px-6 py-4 font-mono text-xs text-zinc-500">{s.short_code}</td>
-                        <td className="px-6 py-4 text-right text-zinc-900">{s.click_count}</td>
+                      <tr key={i}>
+                        <td className="px-6 py-4 text-zinc-900">{s.influencer_name}</td>
                         <td className="px-6 py-4 text-right font-bold text-emerald-600">{s.conversion_count}</td>
                         <td className="px-6 py-4 text-right">
-                          <button 
-                            onClick={() => handleConfirmSale(s.short_code)}
-                            className="bg-emerald-50 text-emerald-600 px-3 py-1 rounded-lg text-[10px] font-bold hover:bg-emerald-100 transition-colors"
-                          >
-                            Confirm Sale
-                          </button>
+                          <button onClick={() => handleConfirmSale(s.short_code)} className="text-[10px] font-bold text-emerald-600">Confirm Sale</button>
                         </td>
                       </tr>
                     ))}
+                    {stats.length === 0 && (
+                      <tr>
+                        <td colSpan={3} className="px-6 py-12 text-center text-zinc-400 text-xs italic">No activity recorded yet for this campaign.</td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
-            </motion.div>
+            </div>
           ) : (
-            <div className="h-full flex flex-col items-center justify-center text-zinc-400 border-2 border-dashed border-zinc-100 rounded-3xl">
-              <Megaphone size={48} className="mb-4 opacity-20" />
-              <p>Select a campaign to view detailed analytics</p>
+            <div className="h-full min-h-[400px] flex flex-col items-center justify-center text-zinc-400 border-2 border-dashed border-zinc-100 rounded-[40px] bg-white">
+              <Megaphone size={40} className="mb-4 opacity-20" />
+              <p className="text-sm">Select a campaign to view detailed performance</p>
             </div>
           )}
         </div>
       </div>
 
+      {/* Create Campaign Modal */}
+      <AnimatePresence>
+        {showCreate && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-zinc-900/40 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9 }} 
+              animate={{ opacity: 1, scale: 1 }} 
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="bg-white rounded-[40px] p-12 max-w-xl w-full shadow-2xl"
+            >
+              <h3 className="text-3xl font-bold mb-8">Launch Campaign</h3>
+              <form onSubmit={handleCreate} className="space-y-4">
+                <input 
+                  className="w-full px-6 py-4 rounded-2xl border border-zinc-100 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all font-medium" 
+                  placeholder="Campaign Title" 
+                  value={newCampaign.title} 
+                  onChange={e => setNewCampaign({...newCampaign, title: e.target.value})} 
+                  required
+                />
+                <textarea 
+                  className="w-full px-6 py-4 rounded-2xl border border-zinc-100 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all font-medium min-h-[120px]" 
+                  placeholder="Description" 
+                  value={newCampaign.description} 
+                  onChange={e => setNewCampaign({...newCampaign, description: e.target.value})} 
+                  required
+                />
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2 px-6">Payout per Lead (₦)</label>
+                    <input 
+                      type="number" 
+                      className="w-full px-6 py-4 rounded-2xl border border-zinc-100 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all font-medium" 
+                      value={newCampaign.payout_per_lead} 
+                      onChange={e => setNewCampaign({...newCampaign, payout_per_lead: parseInt(e.target.value)})} 
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2 px-6">WhatsApp (234...)</label>
+                    <input 
+                      className="w-full px-6 py-4 rounded-2xl border border-zinc-100 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all font-medium" 
+                      value={newCampaign.wa_number} 
+                      onChange={e => setNewCampaign({...newCampaign, wa_number: e.target.value})} 
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-4 pt-6">
+                  <button type="button" onClick={() => setShowCreate(false)} className="flex-1 py-4 font-bold text-zinc-500">Cancel</button>
+                  <button type="submit" className="flex-1 bg-zinc-900 text-white py-4 rounded-2xl font-bold hover:bg-zinc-800 transition-all">Create Campaign</button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Deposit Modal */}
       <AnimatePresence>
         {showDeposit && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-zinc-900/40 backdrop-blur-sm">
             <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowDeposit(false)}
-              className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
+              initial={{ opacity: 0, scale: 0.9 }} 
+              animate={{ opacity: 1, scale: 1 }} 
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="bg-white rounded-[40px] p-12 max-w-md w-full shadow-2xl"
             >
-              <div className="p-8">
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center">
-                    <ArrowDownCircle size={24} />
-                  </div>
-                  <div>
-                    <h3 className="text-2xl font-bold text-zinc-900">Deposit Funds</h3>
-                    <p className="text-xs text-zinc-500">Add funds to your campaign wallet</p>
-                  </div>
+              <h3 className="text-3xl font-bold mb-4">Add Funds</h3>
+              <p className="text-zinc-500 mb-8">Deposit funds to pay your influencers automatically.</p>
+              <form onSubmit={handleDeposit} className="space-y-4">
+                <input 
+                  type="number" 
+                  className="w-full px-6 py-4 rounded-2xl border border-zinc-100 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all font-medium text-2xl text-center" 
+                  placeholder="₦0.00" 
+                  value={depositAmount} 
+                  onChange={e => setDepositAmount(e.target.value)} 
+                  required
+                />
+                <div className="flex gap-4 pt-6">
+                  <button type="button" onClick={() => setShowDeposit(false)} className="flex-1 py-4 font-bold text-zinc-500">Cancel</button>
+                  <button type="submit" className="flex-1 bg-emerald-600 text-white py-4 rounded-2xl font-bold hover:bg-emerald-700 transition-all">Confirm Deposit</button>
                 </div>
-                
-                <form onSubmit={handleDeposit} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Amount to Deposit (₦)</label>
-                    <input 
-                      required
-                      type="number"
-                      className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all"
-                      placeholder="e.g. 50000"
-                      min="1000"
-                      value={depositAmount}
-                      onChange={e => setDepositAmount(e.target.value)}
-                    />
-                  </div>
-                  <div className="p-4 bg-zinc-50 rounded-2xl border border-zinc-100">
-                    <p className="text-[10px] text-zinc-400 uppercase font-bold mb-1">Payment Method</p>
-                    <div className="flex items-center gap-2 text-sm font-medium text-zinc-900">
-                      <CreditCard size={16} />
-                      Saved Card (**** 4242)
-                    </div>
-                  </div>
-                  <div className="pt-4 flex gap-3">
-                    <button 
-                      type="button"
-                      onClick={() => setShowDeposit(false)}
-                      className="flex-1 px-6 py-3 rounded-xl font-bold text-zinc-500 hover:bg-zinc-50 transition-all"
-                    >
-                      Cancel
-                    </button>
-                    <button 
-                      type="submit"
-                      className="flex-1 bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-500/20"
-                    >
-                      Confirm Deposit
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Assign Modal */}
-      <AnimatePresence>
-        {showAssign && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowAssign(false)}
-              className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
-            >
-              <div className="p-8">
-                <h3 className="text-2xl font-bold text-zinc-900 mb-2">Assign Influencer</h3>
-                <p className="text-zinc-500 text-sm mb-6">Generate a unique tracking link for an influencer.</p>
-                
-                <div className="space-y-2 max-h-64 overflow-y-auto pr-2">
-                  {allInfluencers.filter(i => !stats.some(s => s.influencer_name === i.name)).map(i => (
-                    <button
-                      key={i.id}
-                      onClick={() => handleAssign(i.id)}
-                      className="w-full text-left p-4 rounded-2xl border border-zinc-100 hover:border-emerald-200 hover:bg-emerald-50 transition-all flex justify-between items-center group"
-                    >
-                      <div>
-                        <div className="font-bold text-zinc-900">{i.name}</div>
-                        <div className="text-xs text-zinc-500">@{i.handle} • {i.platform}</div>
-                      </div>
-                      <ChevronRight size={18} className="text-zinc-300 group-hover:text-emerald-600 transition-colors" />
-                    </button>
-                  ))}
-                  {allInfluencers.filter(i => !stats.some(s => s.influencer_name === i.name)).length === 0 && (
-                    <div className="text-center py-8 text-zinc-400 text-sm">
-                      All available influencers are already assigned.
-                    </div>
-                  )}
-                </div>
-
-                <div className="mt-8 pt-6 border-t border-zinc-100">
-                  <button 
-                    onClick={() => setShowAssign(false)}
-                    className="w-full py-3 rounded-xl font-bold text-zinc-500 hover:bg-zinc-50 transition-all"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Create Modal */}
-      <AnimatePresence>
-        {showCreate && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowCreate(false)}
-              className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden"
-            >
-              <div className="p-8">
-                <h3 className="text-2xl font-bold text-zinc-900 mb-6">New Campaign</h3>
-                <form onSubmit={handleCreate} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Campaign Title</label>
-                    <input 
-                      required
-                      className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all"
-                      placeholder="e.g. Summer Shoe Sale"
-                      value={newCampaign.title}
-                      onChange={e => setNewCampaign({...newCampaign, title: e.target.value})}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Description</label>
-                    <textarea 
-                      className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all h-24"
-                      placeholder="What are you promoting?"
-                      value={newCampaign.description}
-                      onChange={e => setNewCampaign({...newCampaign, description: e.target.value})}
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Budget (₦)</label>
-                      <input 
-                        type="number"
-                        className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all"
-                        value={newCampaign.budget}
-                        onChange={e => setNewCampaign({...newCampaign, budget: parseInt(e.target.value)})}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Payout/Lead (₦)</label>
-                      <input 
-                        type="number"
-                        className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all"
-                        value={newCampaign.payout_per_lead}
-                        onChange={e => setNewCampaign({...newCampaign, payout_per_lead: parseInt(e.target.value)})}
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">WhatsApp Number</label>
-                    <input 
-                      required
-                      className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all"
-                      placeholder="234..."
-                      value={newCampaign.wa_number}
-                      onChange={e => setNewCampaign({...newCampaign, wa_number: e.target.value})}
-                    />
-                  </div>
-                  <div className="pt-4 flex gap-3">
-                    <button 
-                      type="button"
-                      onClick={() => setShowCreate(false)}
-                      className="flex-1 px-6 py-3 rounded-xl font-bold text-zinc-500 hover:bg-zinc-50 transition-all"
-                    >
-                      Cancel
-                    </button>
-                    <button 
-                      type="submit"
-                      className="flex-1 bg-emerald-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-emerald-700 transition-all"
-                    >
-                      Launch
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Subscription Modal */}
-      <AnimatePresence>
-        {showPayModal && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => !isActivating && setShowPayModal(false)}
-              className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
-            >
-              <div className="p-8 text-center">
-                <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
-                  <Wallet size={32} />
-                </div>
-                <h3 className="text-2xl font-bold text-zinc-900 mb-2">Activate Dashboard</h3>
-                <p className="text-zinc-500 mb-8">Pay the monthly platform fee to start creating campaigns and tracking ROI.</p>
-                
-                <div className="bg-zinc-50 rounded-2xl p-6 mb-8 border border-zinc-100">
-                  <div className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-1">Monthly Subscription</div>
-                  <div className="text-3xl font-black text-zinc-900">₦10,000</div>
-                </div>
-
-                <div className="space-y-3">
-                  <button 
-                    onClick={handleActivate}
-                    disabled={isActivating}
-                    className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-200 flex items-center justify-center gap-2 disabled:bg-emerald-400 disabled:cursor-not-allowed"
-                  >
-                    {isActivating ? (
-                      <span className="flex items-center gap-2">
-                        <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                        Initializing...
-                      </span>
-                    ) : (
-                      <>Secure Payment via Paystack</>
-                    )}
-                  </button>
-                  <button 
-                    onClick={() => setShowPayModal(false)}
-                    disabled={isActivating}
-                    className="w-full py-3 rounded-xl font-bold text-zinc-400 hover:text-zinc-600 transition-all disabled:opacity-50"
-                  >
-                    Maybe later
-                  </button>
-                </div>
-                
-                <div className="mt-8 pt-6 border-t border-zinc-50 flex items-center justify-center gap-4 opacity-50 grayscale">
-                  <img src="https://picsum.photos/seed/paystack/100/30" alt="Paystack" className="h-4" referrerPolicy="no-referrer" />
-                  <img src="https://picsum.photos/seed/visa/100/30" alt="Visa" className="h-4" referrerPolicy="no-referrer" />
-                  <img src="https://picsum.photos/seed/mastercard/100/30" alt="Mastercard" className="h-4" referrerPolicy="no-referrer" />
-                </div>
-
-                <p className="mt-4 text-[10px] text-zinc-400 px-4">
-                  By subscribing, you agree to our terms of service. Payments are handled securely through our PCI-compliant processing partner.
-                </p>
-              </div>
+              </form>
             </motion.div>
           </div>
         )}
@@ -1208,7 +857,7 @@ const BrandDashboard = ({ authenticatedFetch, user }: { authenticatedFetch: (url
   );
 };
 
-const InfluencerDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: string, options?: RequestInit) => Promise<Response> }) => {
+const InfluencerDashboard = ({ authenticatedFetch, lastNotification }: { authenticatedFetch: (url: string, options?: RequestInit) => Promise<Response>, lastNotification?: any }) => {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [walletData, setWalletData] = useState<any>(null);
   const [links, setLinks] = useState<any[]>([]);
@@ -1220,19 +869,20 @@ const InfluencerDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url:
     fetchLinks();
   }, []);
 
+  useEffect(() => {
+    if (lastNotification?.type === "CONVERSION") {
+      fetchWallet();
+      fetchLinks();
+    }
+  }, [lastNotification]);
+
   const fetchData = async () => {
     try {
       const res = await authenticatedFetch("/api/campaigns");
       const data = await res.json();
-      if (Array.isArray(data)) {
-        setCampaigns(data);
-      } else {
-        console.error("Fetch campaigns error: Expected array, got", data);
-        setCampaigns([]);
-      }
+      if (Array.isArray(data)) setCampaigns(data);
     } catch (err) {
       console.error("Fetch campaigns error:", err);
-      setCampaigns([]);
     }
   };
 
@@ -1240,11 +890,7 @@ const InfluencerDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url:
     try {
       const res = await authenticatedFetch("/api/influencers/wallet");
       const data = await res.json();
-      if (res.ok) {
-        setWalletData(data);
-      } else {
-        console.error("Fetch wallet error:", data);
-      }
+      if (res.ok) setWalletData(data);
     } catch (err) {
       console.error("Fetch wallet error:", err);
     }
@@ -1254,15 +900,9 @@ const InfluencerDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url:
     try {
       const res = await authenticatedFetch("/api/influencers/links");
       const data = await res.json();
-      if (Array.isArray(data)) {
-        setLinks(data);
-      } else {
-        console.error("Fetch links error:", data);
-        setLinks([]);
-      }
+      if (Array.isArray(data)) setLinks(data);
     } catch (err) {
       console.error("Fetch links error:", err);
-      setLinks([]);
     }
   };
 
@@ -1273,11 +913,7 @@ const InfluencerDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url:
         method: "POST",
         body: JSON.stringify({ campaignId })
       });
-      if (res.ok) {
-        await fetchLinks();
-      }
-    } catch (err) {
-      console.error("Error generating link:", err);
+      if (res.ok) await fetchLinks();
     } finally {
       setLoading(false);
     }
@@ -1286,107 +922,19 @@ const InfluencerDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url:
   const copyToClipboard = (text: string) => {
     const fullUrl = `${window.location.origin}/l/${text}`;
     navigator.clipboard.writeText(fullUrl);
-    alert("Tracking link copied to clipboard!");
+    alert("Tracking link copied!");
   };
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
+      <div className="flex justify-between items-center mb-12">
         <div>
-          <h2 className="text-3xl font-bold text-zinc-900 tracking-tight">Influencer Portal</h2>
+          <h2 className="text-3xl font-bold text-zinc-900">Influencer Dashboard</h2>
           <p className="text-zinc-500">Pick a campaign and start earning</p>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="bg-white px-6 py-3 rounded-2xl border border-zinc-100 shadow-sm">
-            <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Total Earnings</div>
-            <div className="text-xl font-bold text-emerald-600">₦{walletData?.influencer?.walletBalance?.toLocaleString() || "0"}</div>
-          </div>
-        </div>
-      </div>
-
-      {walletData ? (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-16">
-          <div className="lg:col-span-2 bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
-            <div className="flex items-center justify-between mb-8">
-              <div className="flex items-center gap-2">
-                <TrendingUp size={20} className="text-emerald-600" />
-                <h3 className="font-bold text-zinc-900">Your Performance</h3>
-              </div>
-              <div className="text-xs text-zinc-400 font-bold uppercase tracking-widest">Active Links: {links.length}</div>
-            </div>
-            
-            {links.length > 0 ? (
-              <div className="overflow-hidden rounded-3xl border border-zinc-50">
-                <table className="w-full text-left">
-                  <thead className="bg-zinc-50 border-b border-zinc-100">
-                    <tr>
-                      <th className="px-6 py-4 text-[10px] font-bold text-zinc-400 uppercase">Campaign</th>
-                      <th className="px-6 py-4 text-[10px] font-bold text-zinc-400 uppercase text-right">Clicks</th>
-                      <th className="px-6 py-4 text-[10px] font-bold text-zinc-400 uppercase text-right">Sales</th>
-                      <th className="px-6 py-4 text-[10px] font-bold text-zinc-400 uppercase text-right">Revenue</th>
-                      <th className="px-6 py-4 text-[10px] font-bold text-zinc-400 uppercase text-right">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-50">
-                    {links.map((link) => (
-                      <tr key={link.id} className="hover:bg-zinc-50/50 transition-colors">
-                        <td className="px-6 py-4">
-                          <div className="font-bold text-zinc-900 text-sm">{link.campaign?.title || "Unknown"}</div>
-                          <div className="text-[10px] font-mono text-zinc-400 uppercase tracking-tighter">Code: {link.shortCode}</div>
-                        </td>
-                        <td className="px-6 py-4 text-right text-sm font-medium">{link.clickCount}</td>
-                        <td className="px-6 py-4 text-right text-sm font-bold text-emerald-600">{link.conversionCount}</td>
-                        <td className="px-6 py-4 text-right text-sm font-bold text-zinc-900">
-                          ₦{(link.conversionCount * (link.campaign?.payout_per_lead || 0)).toLocaleString()}
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          <button 
-                            onClick={() => copyToClipboard(link.shortCode)}
-                            className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
-                            title="Copy Tracking Link"
-                          >
-                            <LinkIcon size={16} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="text-center py-12 bg-zinc-50 rounded-3xl border border-dashed border-zinc-200">
-                <LinkIcon size={32} className="mx-auto mb-3 text-zinc-300" />
-                <p className="text-zinc-500 text-sm">You haven't generated any tracking links yet.</p>
-              </div>
-            )}
-          </div>
-
-          <div className="lg:col-span-1 bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
-            <div className="flex items-center gap-2 mb-6">
-              <History size={20} className="text-zinc-400" />
-              <h3 className="font-bold text-zinc-900">Recent Payouts</h3>
-            </div>
-            <div className="space-y-4">
-              {walletData.transactions?.length > 0 ? walletData.transactions.map((t: any) => (
-                <div key={t.id} className="flex justify-between items-center p-4 rounded-2xl bg-zinc-50 border border-zinc-100">
-                  <div>
-                    <div className="font-bold text-zinc-900 text-sm">{t.type}</div>
-                    <div className="text-[10px] text-zinc-400 uppercase tracking-tighter">{new Date(t.createdAt).toLocaleString()}</div>
-                  </div>
-                  <div className={`text-right font-bold text-sm ${t.type === 'CREDIT' ? 'text-emerald-600' : 'text-red-600'}`}>
-                    {t.type === 'CREDIT' ? '+' : '-'}₦{t.amount.toLocaleString()}
-                  </div>
-                </div>
-              )) : <div className="text-center text-zinc-400 py-8 text-sm italic">No transactions yet</div>}
-            </div>
-          </div>
-        </div>
-      ) : <div className="p-12 text-center text-zinc-400">Loading wallet...</div>}
-
-      <div className="mb-8 flex justify-between items-end">
-        <div>
-          <h3 className="text-sm font-bold text-zinc-400 uppercase tracking-widest mb-1">Available Campaigns</h3>
-          <p className="text-xs text-zinc-500">Earn money by promoting these brands</p>
+        <div className="bg-white px-6 py-3 rounded-2xl shadow-sm border border-zinc-100">
+          <div className="text-[10px] font-bold text-zinc-400 uppercase">Total Earnings</div>
+          <div className="text-xl font-bold text-emerald-600">₦{walletData?.influencer?.walletBalance?.toLocaleString() || "0"}</div>
         </div>
       </div>
 
@@ -1394,198 +942,20 @@ const InfluencerDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url:
         {campaigns.map((c) => {
           const hasLink = links.some(l => l.campaignId === c.id);
           return (
-            <div key={c.id} className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm hover:shadow-md transition-all group">
-              <div className="flex justify-between items-start mb-4">
-                <h4 className="text-xl font-bold text-zinc-900 group-hover:text-emerald-600 transition-colors">{c.title}</h4>
-                <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
-                  <Megaphone size={20} />
-                </div>
-              </div>
-              <p className="text-zinc-500 text-sm mb-8 line-clamp-2 leading-relaxed">{c.description}</p>
+            <div key={c.id} className="bg-white p-8 rounded-3xl border border-zinc-100 shadow-sm">
+              <h4 className="text-xl font-bold text-zinc-900 mb-4">{c.title}</h4>
+              <p className="text-sm text-zinc-500 mb-8">{c.description}</p>
               <div className="flex justify-between items-center pt-6 border-t border-zinc-50">
-                <div>
-                  <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-1">Payout</div>
-                  <div className="text-lg font-bold text-emerald-600">₦{c.payout_per_lead}/lead</div>
-                </div>
+                <div className="text-lg font-bold text-emerald-600">₦{c.payout_per_lead}/lead</div>
                 {hasLink ? (
-                  <button 
-                    onClick={() => copyToClipboard(links.find(l => l.campaignId === c.id).shortCode)}
-                    className="bg-emerald-600 text-white px-6 py-3 rounded-2xl text-xs font-bold hover:bg-emerald-700 transition-all flex items-center gap-2 shadow-lg shadow-emerald-100"
-                  >
-                    <LinkIcon size={14} /> Copy Link
-                  </button>
+                  <button onClick={() => copyToClipboard(links.find(l => l.campaignId === c.id).shortCode)} className="bg-emerald-600 text-white px-6 py-2 rounded-xl text-xs font-bold">Copy Link</button>
                 ) : (
-                  <button 
-                    onClick={() => handleGetLink(c.id)}
-                    disabled={loading}
-                    className="bg-zinc-900 text-white px-6 py-3 rounded-2xl text-xs font-bold hover:bg-zinc-800 transition-all disabled:opacity-50"
-                  >
-                    {loading ? "Generating..." : "Join Campaign"}
-                  </button>
+                  <button onClick={() => handleGetLink(c.id)} className="bg-zinc-900 text-white px-6 py-2 rounded-xl text-xs font-bold">Join Campaign</button>
                 )}
               </div>
             </div>
           );
         })}
-      </div>
-
-      {campaigns.length === 0 && (
-        <div className="text-center py-24 bg-white rounded-[40px] border border-dashed border-zinc-200">
-          <Megaphone size={48} className="mx-auto mb-4 text-zinc-200" />
-          <h3 className="text-xl font-bold text-zinc-900 mb-2">No Active Campaigns</h3>
-          <p className="text-zinc-500 max-w-sm mx-auto">There are currently no open campaigns. Check back later or contact support.</p>
-        </div>
-      )}
-    </div>
-  );
-};
-
-const AnalyticsDashboard = ({ onNavigateToLanding }: { onNavigateToLanding: () => void }) => {
-  const [data, setData] = useState<any>(null);
-
-  useEffect(() => {
-    fetch("/api/public/analytics")
-      .then(res => res.json())
-      .then(setData)
-      .catch(err => console.error("Failed to fetch public analytics:", err));
-  }, []);
-
-  if (!data) return (
-    <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4">
-      <div className="w-12 h-12 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
-      <p className="text-zinc-500 font-medium">Crunching platform data...</p>
-    </div>
-  );
-
-  return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-      <div className="mb-16 text-center">
-        <h2 className="text-4xl md:text-5xl font-bold text-zinc-900 tracking-tight mb-4">Platform Performance</h2>
-        <p className="text-zinc-500 text-lg max-w-2xl mx-auto">
-          Real-time visibility into the NaijaTrack ecosystem. See how our network of influencers and brands are driving impact.
-        </p>
-      </div>
-
-      {/* Global Stats bar */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-16">
-        {[
-          { label: "Total Traffic", value: data.totalClicks, color: "text-blue-600", bg: "bg-blue-50" },
-          { label: "Successful Sales", value: data.totalConversions, color: "text-emerald-600", bg: "bg-emerald-50" },
-          { label: "Active Brands", value: data.platformStats?.brands, color: "text-purple-600", bg: "bg-purple-50" },
-          { label: "Partnered Influencers", value: data.platformStats?.influencers, color: "text-orange-600", bg: "bg-orange-50" },
-        ].map((stat, i) => (
-          <div key={i} className={`${stat.bg} p-6 rounded-[32px] border border-zinc-100/50`}>
-            <div className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest mb-1">{stat.label}</div>
-            <div className={`text-2xl font-black ${stat.color}`}>{stat.value?.toLocaleString() || "0"}</div>
-          </div>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
-        {/* Top Influencers */}
-        <section>
-          <div className="flex items-center gap-3 mb-8">
-            <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center text-white shadow-lg">
-              <Users size={20} />
-            </div>
-            <h3 className="text-2xl font-bold text-zinc-900">Leaderboard: Top Influencers</h3>
-          </div>
-          
-          <div className="bg-white rounded-[40px] border border-zinc-100 shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-zinc-50/50 border-b border-zinc-100">
-                    <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">Influencer</th>
-                    <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">Traffic</th>
-                    <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">Conversions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-zinc-50">
-                  {data.topInfluencers && data.topInfluencers.length > 0 ? data.topInfluencers.map((inf: any, i: number) => (
-                    <tr key={i} className="hover:bg-zinc-50/50 transition-colors">
-                      <td className="px-8 py-6">
-                        <div className="font-bold text-zinc-900 capitalize">{inf.name}</div>
-                      </td>
-                      <td className="px-8 py-6">
-                        <div className="text-zinc-600 font-medium">{inf.clicks.toLocaleString()}</div>
-                      </td>
-                      <td className="px-8 py-6">
-                        <div className="inline-flex items-center px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-sm font-bold">
-                          {inf.conversions.toLocaleString()}
-                        </div>
-                      </td>
-                    </tr>
-                  )) : (
-                    <tr>
-                      <td colSpan={3} className="px-8 py-12 text-center text-zinc-400">No stats available yet</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
-
-        {/* Top Campaigns */}
-        <section>
-          <div className="flex items-center gap-3 mb-8">
-            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg">
-              <Megaphone size={20} />
-            </div>
-            <h3 className="text-2xl font-bold text-zinc-900">Trending Campaigns</h3>
-          </div>
-
-          <div className="bg-white rounded-[40px] border border-zinc-100 shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-zinc-50/50 border-b border-zinc-100">
-                    <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">Campaign</th>
-                    <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">Interest</th>
-                    <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">Sales</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-zinc-50">
-                  {data.topCampaigns && data.topCampaigns.length > 0 ? data.topCampaigns.map((camp: any, i: number) => (
-                    <tr key={i} className="hover:bg-zinc-50/50 transition-colors">
-                      <td className="px-8 py-6">
-                        <div className="font-bold text-zinc-900 capitalize truncate max-w-[200px]">{camp.title}</div>
-                      </td>
-                      <td className="px-8 py-6">
-                        <div className="text-zinc-600 font-medium">{camp.clicks.toLocaleString()}</div>
-                      </td>
-                      <td className="px-8 py-6">
-                        <div className="inline-flex items-center px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-sm font-bold">
-                          {camp.conversions.toLocaleString()}
-                        </div>
-                      </td>
-                    </tr>
-                  )) : (
-                    <tr>
-                      <td colSpan={3} className="px-8 py-12 text-center text-zinc-400">No active campaigns yet</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <div className="mt-20 p-12 bg-zinc-900 rounded-[40px] text-center text-white">
-        <h4 className="text-2xl font-bold mb-4">Want to be part of these stats?</h4>
-        <p className="text-white/60 mb-8 max-w-lg mx-auto">
-          Join hundreds of brands and influencers leveraging NaijaTrack for data-driven campaign management and instant rewards.
-        </p>
-        <div className="flex flex-wrap justify-center gap-4">
-          <button 
-            onClick={onNavigateToLanding}
-            className="px-8 py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-black rounded-2xl transition-all shadow-xl shadow-emerald-500/20"
-          >
-            Get Started Now
-          </button>
-        </div>
       </div>
     </div>
   );
@@ -1593,9 +963,6 @@ const AnalyticsDashboard = ({ onNavigateToLanding }: { onNavigateToLanding: () =
 
 const AdminDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: string, options?: RequestInit) => Promise<Response> }) => {
   const [stats, setStats] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState("overview");
-  const [showWithdraw, setShowWithdraw] = useState(false);
-  const [withdrawForm, setWithdrawForm] = useState({ amount: "", bankName: "", accountNumber: "" });
 
   useEffect(() => {
     fetchStats();
@@ -1607,27 +974,7 @@ const AdminDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: stri
       const data = await res.json();
       setStats(data);
     } catch (err) {
-      console.error("Failed to fetch admin stats:", err);
-    }
-  };
-
-  const handleWithdraw = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const res = await authenticatedFetch("/api/admin/withdraw", {
-        method: "POST",
-        body: JSON.stringify(withdrawForm)
-      });
-      if (res.ok) {
-        setShowWithdraw(false);
-        setWithdrawForm({ amount: "", bankName: "", accountNumber: "" });
-        fetchStats();
-      } else {
-        const error = await res.json();
-        alert("Withdrawal failed: " + (error.error || "Unknown error"));
-      }
-    } catch (err) {
-      console.error("Withdrawal error:", err);
+      console.error("Fetch admin stats error:", err);
     }
   };
 
@@ -1635,307 +982,24 @@ const AdminDashboard = ({ authenticatedFetch }: { authenticatedFetch: (url: stri
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
-        <div>
-          <h2 className="text-3xl font-bold text-zinc-900 tracking-tight">Admin Control Panel</h2>
-          <p className="text-zinc-500">Manage platform operations and revenue</p>
+      <h2 className="text-3xl font-bold text-zinc-900 mb-12">Admin Overview</h2>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <div className="bg-white p-8 rounded-3xl border border-zinc-100 shadow-sm">
+          <div className="text-zinc-400 text-xs font-bold uppercase mb-2">Total Managed Budget</div>
+          <div className="text-3xl font-bold text-zinc-900">₦{stats.totalBudget?.toLocaleString() || "0"}</div>
         </div>
-        <div className="flex bg-zinc-100 p-1 rounded-2xl">
-          {["overview", "wallet", "users"].map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`px-6 py-2 rounded-xl text-sm font-bold transition-all capitalize ${
-                activeTab === tab ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-900"
-              }`}
-            >
-              {tab}
-            </button>
-          ))}
+        <div className="bg-white p-8 rounded-3xl border border-zinc-100 shadow-sm">
+          <div className="text-zinc-400 text-xs font-bold uppercase mb-2">Active Influencers</div>
+          <div className="text-3xl font-bold text-zinc-900">{stats.influencerCount || "0"}</div>
         </div>
-      </div>
-
-      {activeTab === "overview" && (
-        <div className="space-y-8">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="bg-zinc-900 text-white p-8 rounded-[40px] shadow-xl relative overflow-hidden group">
-              <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition-transform">
-                <Banknote size={80} />
-              </div>
-              <div className="relative z-10">
-                <div className="text-white/40 text-xs font-bold uppercase mb-2 tracking-widest">Platform Balance</div>
-                <div className="text-4xl font-bold text-emerald-400 mb-4">₦{stats.balance?.toLocaleString() || "0"}</div>
-                <button 
-                  onClick={() => setShowWithdraw(true)}
-                  className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl text-xs font-bold transition-colors flex items-center gap-2"
-                >
-                  <ArrowUpRight size={14} /> Withdraw Funds
-                </button>
-              </div>
-            </div>
-            <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
-              <div className="text-zinc-400 text-xs font-bold uppercase mb-2 tracking-widest">Total Users</div>
-              <div className="text-3xl font-bold text-zinc-900 mb-1">{stats.totalUsers || 0}</div>
-              <div className="text-[10px] font-bold text-emerald-600 uppercase tracking-tighter flex items-center gap-1">
-                <TrendingUp size={10} /> +12% this month
-              </div>
-            </div>
-            <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
-              <div className="text-zinc-400 text-xs font-bold uppercase mb-2 tracking-widest">Active Campaigns</div>
-              <div className="text-3xl font-bold text-zinc-900 mb-1">{stats.totalCampaigns || 0}</div>
-              <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">Across 42 Brands</div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
-              <h3 className="text-lg font-bold text-zinc-900 mb-6 flex items-center gap-2">
-                <TrendingUp size={20} className="text-emerald-600" /> Revenue Streams
-              </h3>
-              <div className="space-y-6">
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
-                      <Calendar size={20} />
-                    </div>
-                    <div>
-                      <div className="font-bold text-zinc-900">Subscriptions</div>
-                      <div className="text-xs text-zinc-500">Monthly Brand Fees</div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-bold text-zinc-900">₦{stats.subscriptionRevenue?.toLocaleString() || "0"}</div>
-                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">70% of total</div>
-                  </div>
-                </div>
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
-                      <Percent size={20} />
-                    </div>
-                    <div>
-                      <div className="font-bold text-zinc-900">Commissions</div>
-                      <div className="text-xs text-zinc-500">7% Payout Fee</div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-bold text-zinc-900">₦{stats.commissionRevenue?.toLocaleString() || "0"}</div>
-                    <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-tighter">30% of total</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm">
-              <h3 className="text-lg font-bold text-zinc-900 mb-6 flex items-center gap-2">
-                <History size={20} className="text-zinc-400" /> Recent Activity
-              </h3>
-              <div className="space-y-4">
-                {[1, 2, 3, 4].map((i) => (
-                  <div key={i} className="flex items-center justify-between py-3 border-b border-zinc-50 last:border-0">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-zinc-100 rounded-full flex items-center justify-center text-[10px] font-bold">JD</div>
-                      <div>
-                        <div className="text-sm font-bold text-zinc-900">New Brand Signup</div>
-                        <div className="text-[10px] text-zinc-400 uppercase">2 hours ago</div>
-                      </div>
-                    </div>
-                    <ChevronRight size={16} className="text-zinc-300" />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {activeTab === "wallet" && (
-        <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm text-center py-24">
-          <Banknote size={48} className="mx-auto mb-4 text-zinc-200" />
-          <h3 className="text-xl font-bold text-zinc-900 mb-2">Wallet Management</h3>
-          <p className="text-zinc-500 max-w-sm mx-auto">Detailed transaction history and withdrawal management will be available here.</p>
-        </div>
-      )}
-
-      {activeTab === "users" && (
-        <div className="bg-white p-8 rounded-[40px] border border-zinc-100 shadow-sm text-center py-24">
-          <Users size={48} className="mx-auto mb-4 text-zinc-200" />
-          <h3 className="text-xl font-bold text-zinc-900 mb-2">User Management</h3>
-          <p className="text-zinc-500 max-w-sm mx-auto">Manage brands, influencers, and system administrators.</p>
-        </div>
-      )}
-
-      {/* Withdrawal Modal */}
-      <AnimatePresence>
-        {showWithdraw && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowWithdraw(false)}
-              className="absolute inset-0 bg-zinc-900/60 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative bg-white w-full max-w-md rounded-[40px] shadow-2xl overflow-hidden"
-            >
-              <div className="p-8">
-                <div className="flex items-center gap-3 mb-8">
-                  <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center">
-                    <Banknote size={24} />
-                  </div>
-                  <div>
-                    <h3 className="text-2xl font-bold text-zinc-900">Withdraw Funds</h3>
-                    <p className="text-xs text-zinc-500">Transfer earnings to your bank account</p>
-                  </div>
-                </div>
-
-                <form onSubmit={handleWithdraw} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Amount (₦)</label>
-                    <input 
-                      required
-                      type="number"
-                      className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:border-emerald-600 outline-none"
-                      placeholder="0.00"
-                      value={withdrawForm.amount}
-                      onChange={e => setWithdrawForm({...withdrawForm, amount: e.target.value})}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Bank Name</label>
-                    <input 
-                      required
-                      className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:border-emerald-600 outline-none"
-                      placeholder="e.g. Zenith Bank"
-                      value={withdrawForm.bankName}
-                      onChange={e => setWithdrawForm({...withdrawForm, bankName: e.target.value})}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Account Number</label>
-                    <input 
-                      required
-                      className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:border-emerald-600 outline-none"
-                      placeholder="10-digit number"
-                      maxLength={10}
-                      value={withdrawForm.accountNumber}
-                      onChange={e => setWithdrawForm({...withdrawForm, accountNumber: e.target.value})}
-                    />
-                  </div>
-                  <div className="pt-6 flex gap-3">
-                    <button 
-                      type="button"
-                      onClick={() => setShowWithdraw(false)}
-                      className="flex-1 px-6 py-3 rounded-xl font-bold text-zinc-500 hover:bg-zinc-50 transition-all"
-                    >
-                      Cancel
-                    </button>
-                    <button 
-                      type="submit"
-                      className="flex-1 bg-zinc-900 text-white px-6 py-3 rounded-xl font-bold hover:bg-zinc-800 transition-all shadow-lg"
-                    >
-                      Confirm
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-};
-
-const SMEPortal = () => {
-  const [clickId, setClickId] = useState("");
-  const [amount, setAmount] = useState("");
-  const [status, setStatus] = useState<{ type: "success" | "error", message: string } | null>(null);
-
-  const handleConfirm = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const res = await fetch("/api/conversions/confirm", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ click_id: clickId, amount: parseFloat(amount) })
-    });
-    if (res.ok) {
-      setStatus({ type: "success", message: "Sale confirmed! Influencer payout updated." });
-      setClickId("");
-      setAmount("");
-    } else {
-      setStatus({ type: "error", message: "Invalid Reference ID or already confirmed." });
-    }
-  };
-
-  return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      <div className="max-w-lg mx-auto bg-white p-12 rounded-[40px] border border-zinc-100 shadow-xl">
-        <div className="text-center mb-10">
-          <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-3xl flex items-center justify-center mx-auto mb-6">
-            <ShieldCheck size={32} />
-          </div>
-          <h2 className="text-3xl font-bold text-zinc-900 mb-2">SME Sale Confirmation</h2>
-          <p className="text-zinc-500">Enter the reference ID from the WhatsApp message to confirm a sale.</p>
-        </div>
-
-        {status && (
-          <motion.div 
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className={`p-4 rounded-2xl mb-8 text-sm font-medium ${
-              status.type === "success" ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
-            }`}
-          >
-            {status.message}
-          </motion.div>
-        )}
-
-        <form onSubmit={handleConfirm} className="space-y-6">
-          <div>
-            <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Reference ID (from WhatsApp)</label>
-            <input 
-              required
-              className="w-full px-6 py-4 rounded-2xl border border-zinc-200 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all text-lg font-mono"
-              placeholder="e.g. x7y2z9"
-              value={clickId}
-              onChange={e => setClickId(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-zinc-400 uppercase mb-2">Sale Amount (₦)</label>
-            <input 
-              required
-              type="number"
-              className="w-full px-6 py-4 rounded-2xl border border-zinc-200 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 outline-none transition-all text-lg"
-              placeholder="0.00"
-              value={amount}
-              onChange={e => setAmount(e.target.value)}
-            />
-          </div>
-          <button 
-            type="submit"
-            className="w-full bg-zinc-900 text-white py-5 rounded-2xl font-bold text-lg hover:bg-zinc-800 transition-all shadow-lg"
-          >
-            Confirm Closure
-          </button>
-        </form>
-
-        <div className="mt-12 pt-12 border-t border-zinc-100 text-center">
-          <p className="text-xs text-zinc-400 leading-relaxed italic">
-            "By confirming this sale, you authorize the performance-based payout to the attributed influencer via escrow."
-          </p>
+        <div className="bg-white p-8 rounded-3xl border border-zinc-100 shadow-sm">
+          <div className="text-zinc-400 text-xs font-bold uppercase mb-2">Total Payouts</div>
+          <div className="text-3xl font-bold text-emerald-600">₦{stats.totalPayouts?.toLocaleString() || "0"}</div>
         </div>
       </div>
     </div>
   );
 };
-
-// --- Main App ---
 
 export default function App() {
   const [activeView, setActiveView] = useState("landing");
@@ -1945,34 +1009,6 @@ export default function App() {
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [intendedRole, setIntendedRole] = useState<'BRAND' | 'INFLUENCER' | null>(null);
 
-  // Redirect logged-in users to their correct dashboard
-  useEffect(() => {
-    if (isAuthReady && user && (activeView === "auth" || activeView === "landing")) {
-      if (user.role === "ADMIN") setActiveView("admin");
-      else if (user.role === "BRAND") setActiveView("brand");
-      else setActiveView("influencer");
-    }
-  }, [isAuthReady, user, activeView]);
-
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [influencers, setInfluencers] = useState<Influencer[]>([]);
-  const [brands, setBrands] = useState<Brand[]>([]);
-  const [selectedBrand, setSelectedBrand] = useState<Brand | null>(null);
-  const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
-  const [stats, setStats] = useState<CampaignStat[]>([]);
-  const [showCreate, setShowCreate] = useState(false);
-  const [showDeposit, setShowDeposit] = useState(false);
-  const [showAssign, setShowAssign] = useState(false);
-  const [depositAmount, setDepositAmount] = useState("");
-  const [newCampaign, setNewCampaign] = useState({
-    title: "",
-    description: "",
-    budget: 100000,
-    payout_per_lead: 1000,
-    wa_number: ""
-  });
-
-  // Firebase Auth Listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       try {
@@ -1980,7 +1016,6 @@ export default function App() {
           const idToken = await firebaseUser.getIdToken();
           setToken(idToken);
           
-          // Fetch or create user profile in Firestore
           const userRef = doc(db, "users", firebaseUser.uid);
           let userSnap;
           try {
@@ -1988,13 +1023,20 @@ export default function App() {
           } catch (err) {
             const handled = handleFirestoreError(err, OperationType.GET, `users/${firebaseUser.uid}`);
             if (handled === null) {
-               setUser({
+               const fallbackUser: User = {
                  id: firebaseUser.uid,
                  name: firebaseUser.displayName || "User",
                  email: firebaseUser.email || "",
                  role: intendedRole || "INFLUENCER"
-               });
+               };
+               setUser(fallbackUser);
                setIsAuthReady(true);
+               
+               if (activeView === "auth" || activeView === "landing") {
+                 if (fallbackUser.role === "BRAND") setActiveView("brand");
+                 else if (fallbackUser.role === "INFLUENCER") setActiveView("influencer");
+                 else if (fallbackUser.role === "ADMIN") setActiveView("admin");
+               }
                return;
             }
             return;
@@ -2004,169 +1046,25 @@ export default function App() {
             const userData = userSnap.data() as User;
             setUser(userData);
             
-            // Ensure associated profile exists
-            try {
-              if (userData.role === "BRAND") {
-                const brandRef = doc(db, "brands", firebaseUser.uid);
-                let brandSnap;
-                try {
-                  brandSnap = await getDoc(brandRef);
-                } catch (err) {
-                  handleFirestoreError(err, OperationType.GET, `brands/${firebaseUser.uid}`);
-                  return;
-                }
-                
-                if (!brandSnap.exists()) {
-                  try {
-                    await setDoc(brandRef, {
-                      userId: firebaseUser.uid,
-                      companyName: firebaseUser.displayName || "New Brand",
-                      subscriptionStatus: "inactive",
-                      balance: 0,
-                      createdAt: serverTimestamp()
-                    });
-                  } catch (err) {
-                    handleFirestoreError(err, OperationType.WRITE, `brands/${firebaseUser.uid}`);
-                  }
-                }
-              } else if (userData.role === "INFLUENCER") {
-                const influencerRef = doc(db, "influencers", firebaseUser.uid);
-                let influencerSnap;
-                try {
-                  influencerSnap = await getDoc(influencerRef);
-                } catch (err) {
-                  handleFirestoreError(err, OperationType.GET, `influencers/${firebaseUser.uid}`);
-                  return;
-                }
-                
-                if (!influencerSnap.exists()) {
-                  try {
-                    await setDoc(influencerRef, {
-                      userId: firebaseUser.uid,
-                      niche: null,
-                      followers: 0,
-                      walletBalance: 0,
-                      createdAt: serverTimestamp()
-                    });
-                  } catch (err) {
-                    handleFirestoreError(err, OperationType.WRITE, `influencers/${firebaseUser.uid}`);
-                  }
-                }
-              }
-            } catch (profileErr) {
-              console.error("Error ensuring associated profile:", profileErr);
+            // Auto-redirect after login
+            if (activeView === "auth" || activeView === "landing") {
+              if (userData.role === "BRAND") setActiveView("brand");
+              else if (userData.role === "INFLUENCER") setActiveView("influencer");
+              else if (userData.role === "ADMIN") setActiveView("admin");
             }
-          } else {
-            // New user - use intendedRole or default to INFLUENCER
-            const newUser: User = {
-              id: firebaseUser.uid,
-              name: firebaseUser.displayName || "New User",
-              email: firebaseUser.email || "",
-              role: intendedRole || "INFLUENCER"
-            };
-            
-            try {
-              await setDoc(userRef, {
-                ...newUser,
-                createdAt: serverTimestamp(),
-                updatedAt: serverTimestamp()
-              });
-              
-              if (newUser.role === "BRAND") {
-                await setDoc(doc(db, "brands", firebaseUser.uid), {
-                  userId: firebaseUser.uid,
-                  companyName: firebaseUser.displayName || "New Brand",
-                  subscriptionStatus: "inactive",
-                  balance: 0,
-                  createdAt: serverTimestamp()
-                });
-              } else {
-                await setDoc(doc(db, "influencers", firebaseUser.uid), {
-                  userId: firebaseUser.uid,
-                  niche: null,
-                  followers: 0,
-                  walletBalance: 0,
-                  createdAt: serverTimestamp()
-                });
-              }
-            } catch (createErr) {
-              handleFirestoreError(createErr, OperationType.WRITE, `users/${firebaseUser.uid} (and associated)`);
-            }
-            
-            setUser(newUser);
           }
         } else {
           setUser(null);
           setToken(null);
         }
-      } catch (globalAuthErr) {
-        console.error("Global auth state error:", globalAuthErr);
       } finally {
         setIsAuthReady(true);
       }
     });
-
     return () => unsubscribe();
   }, [intendedRole]);
 
-  const handleLogout = async () => {
-    await logout();
-    setActiveView("landing");
-    setIntendedRole(null);
-  };
-
-  const handleStart = (view: string, role?: 'BRAND' | 'INFLUENCER') => {
-    if (role) setIntendedRole(role);
-    setActiveView(view);
-  };
-
-  const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
-    const currentToken = await auth.currentUser?.getIdToken();
-    return fetch(url, {
-      ...options,
-      headers: {
-        ...options.headers,
-        Authorization: `Bearer ${currentToken}`,
-        "Content-Type": "application/json",
-      },
-    });
-  };
-
-  const fetchBrands = async () => {
-    const res = await authenticatedFetch("/api/brands");
-    const data = await res.json();
-    if (res.ok) {
-      setBrands(data);
-      if (data.length > 0 && !selectedBrand) {
-        setSelectedBrand(data[0]);
-      }
-    }
-  };
-
-  const fetchCampaigns = async () => {
-    const res = await authenticatedFetch("/api/campaigns");
-    const data = await res.json();
-    if (res.ok) {
-      setCampaigns(data);
-    }
-  };
-
-  const handleSubscribe = async () => {
-    const res = await authenticatedFetch("/api/brands/subscribe", { method: "POST" });
-    if (res.ok) {
-      fetchBrands();
-    }
-  };
-
-  const fetchStats = async (id: string) => {
-    const res = await authenticatedFetch(`/api/campaigns/${id}/stats`);
-    const data = await res.json();
-    if (res.ok) {
-      setStats(data);
-    }
-  };
-
-  // WebSocket setup
+  // WebSocket for real-time notifications
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}`);
@@ -2185,70 +1083,68 @@ export default function App() {
     return () => ws.close();
   }, []);
 
-  useEffect(() => {
-    if (token) {
-      fetchBrands();
-      fetchCampaigns();
-    }
-  }, [token]);
+  const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
+    const headers = {
+      ...(options.headers || {}),
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    };
+    return fetch(url, { ...options, headers });
+  };
+
+  const handleLogout = async () => {
+    await signOut(auth);
+    setActiveView("landing");
+  };
 
   const removeNotification = (id: string) => {
     setNotifications(prev => prev.filter(n => n.id !== id));
   };
 
-  // Initial data seeding for demo
-  useEffect(() => {
-    // Removed demo seeding as we have a real backend
-  }, []);
+  if (!isAuthReady) return <div className="h-screen flex items-center justify-center bg-zinc-50"><div className="w-12 h-12 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin"></div></div>;
 
   return (
     <ErrorBoundary>
       <div className="min-h-screen bg-zinc-50 font-sans text-zinc-900 selection:bg-emerald-100 selection:text-emerald-900">
-      <Navbar activeView={activeView} setActiveView={setActiveView} user={user} onLogout={handleLogout} />
-      
-      {/* Toast Notifications */}
-      <div className="fixed bottom-8 right-8 z-[200] flex flex-col gap-4 pointer-events-none">
-        <AnimatePresence>
-          {notifications.map((n) => (
-            <motion.div
-              key={n.id}
-              initial={{ opacity: 0, x: 50, scale: 0.9 }}
-              animate={{ opacity: 1, x: 0, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
-              className="pointer-events-auto bg-zinc-900 text-white p-6 rounded-3xl shadow-2xl border border-white/10 flex items-start gap-4 max-w-sm"
-            >
-              <div className="w-10 h-10 bg-emerald-500 rounded-2xl flex items-center justify-center shrink-0">
-                <Bell size={20} className="text-white" />
-              </div>
-              <div className="flex-1">
-                <div className="flex justify-between items-start mb-1">
-                  <h4 className="font-bold text-sm">Sale Confirmed!</h4>
-                  <button onClick={() => removeNotification(n.id)} className="text-white/40 hover:text-white">
-                    <Plus size={16} className="rotate-45" />
-                  </button>
+        <Navbar activeView={activeView} setActiveView={setActiveView} user={user} onLogout={handleLogout} />
+        
+        {/* Toast Notifications */}
+        <div className="fixed bottom-8 right-8 z-[200] flex flex-col gap-4">
+          <AnimatePresence>
+            {notifications.map((n) => (
+              <motion.div
+                key={n.id}
+                initial={{ opacity: 0, x: 50, scale: 0.9 }}
+                animate={{ opacity: 1, x: 0, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                className="bg-zinc-900 text-white p-6 rounded-3xl shadow-2xl border border-white/10 flex items-start gap-4 max-w-sm"
+              >
+                <div className="w-10 h-10 bg-emerald-500 rounded-2xl flex items-center justify-center shrink-0">
+                  <Bell size={20} />
                 </div>
-                <p className="text-xs text-white/70 leading-relaxed">
-                  <span className="text-white font-medium">{n.influencer_name}</span> just earned from <span className="text-white font-medium">{n.campaign_title}</span>.
-                </p>
-                <div className="mt-2 text-[10px] font-bold text-emerald-400 uppercase tracking-widest">
-                  ₦{n.amount.toLocaleString()} Closure
+                <div className="flex-1">
+                  <div className="flex justify-between items-start mb-1">
+                    <h4 className="font-bold text-sm">Sale Confirmed!</h4>
+                    <button onClick={() => removeNotification(n.id)} className="text-white/40"><Plus size={16} className="rotate-45" /></button>
+                  </div>
+                  <p className="text-xs text-white/70">
+                    <span className="text-white font-medium">{n.influencer_name}</span> just earned from <span className="text-white font-medium">{n.campaign_title}</span>.
+                  </p>
+                  <div className="mt-2 text-[10px] font-bold text-emerald-400 uppercase tracking-widest">₦{n.amount?.toLocaleString()} Earned</div>
                 </div>
-              </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </div>
 
-      <main className="flex-1">
-        {!isAuthReady ? (
-          <div className="min-h-[60vh] flex items-center justify-center">
-            <div className="w-12 h-12 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
-          </div>
-        ) : (
+        <main className="flex-1">
           <AnimatePresence mode="wait">
             {activeView === "landing" && (
               <motion.div key="landing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                <LandingPage onStart={handleStart} />
+                <LandingPage onStart={(view, role) => {
+                  if (role) setIntendedRole(role);
+                  setActiveView(view);
+                }} />
               </motion.div>
             )}
             {activeView === "auth" && !user && (
@@ -2263,54 +1159,27 @@ export default function App() {
             )}
             {activeView === "influencer" && user && (user.role === "INFLUENCER" || user.role === "ADMIN") && (
               <motion.div key="influencer" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                <InfluencerDashboard authenticatedFetch={authenticatedFetch} />
-              </motion.div>
-            )}
-            {activeView === "analytics" && (
-              <motion.div key="analytics" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                <AnalyticsDashboard onNavigateToLanding={() => {
-                  setActiveView("landing");
-                  window.scrollTo({ top: 0, behavior: "smooth" });
-                }} />
+                <InfluencerDashboard authenticatedFetch={authenticatedFetch} lastNotification={notifications[0]} />
               </motion.div>
             )}
             {activeView === "admin" && user && user.role === "ADMIN" && (
-              <motion.div key="admin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full">
+              <motion.div key="admin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                 <AdminDashboard authenticatedFetch={authenticatedFetch} />
               </motion.div>
             )}
-            {/* Fallback for unauthorized or unauthenticated */}
-            {activeView !== "landing" && activeView !== "auth" && activeView !== "analytics" && !user && (
-              <motion.div key="unauth" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                <Auth intendedRole={intendedRole} onAuthSuccess={() => {}} />
-              </motion.div>
-            )}
           </AnimatePresence>
-        )}
-      </main>
+        </main>
 
-      <footer className="border-t border-zinc-200 bg-white py-12 mt-24">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row justify-between items-center gap-8">
-          <div className="flex flex-col items-start gap-4">
+        <footer className="border-t border-zinc-200 bg-white py-12 mt-24">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row justify-between items-center gap-8">
             <div className="flex items-center gap-2">
               <div className="w-6 h-6 bg-zinc-900 rounded flex items-center justify-center text-white text-[10px] font-bold">N</div>
               <span className="text-sm font-bold tracking-tight text-zinc-900">NaijaTrack</span>
             </div>
-            <button 
-              onClick={() => setActiveView("admin")}
-              className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-emerald-600 transition-colors"
-            >
-              <ShieldCheck size={14} /> Admin Portal
-            </button>
+            <p className="text-zinc-400 text-xs">© 2026 NaijaTrack. Performance Tracking for Nigeria.</p>
           </div>
-          <p className="text-zinc-400 text-xs">© 2026 NaijaTrack. Built for the Nigerian SME ecosystem.</p>
-          <div className="flex gap-6">
-            <a href="#" className="text-zinc-400 hover:text-zinc-900 transition-colors"><Globe size={18} /></a>
-            <a href="#" className="text-zinc-400 hover:text-zinc-900 transition-colors"><Smartphone size={18} /></a>
-          </div>
-        </div>
-      </footer>
-    </div>
+        </footer>
+      </div>
     </ErrorBoundary>
   );
 }
