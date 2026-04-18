@@ -951,11 +951,13 @@ const BrandDashboard = ({ authenticatedFetch, user }: { authenticatedFetch: (url
   );
 };
 
-const InfluencerDashboard = ({ authenticatedFetch, lastNotification }: { authenticatedFetch: (url: string, options?: RequestInit) => Promise<Response>, lastNotification?: any }) => {
+const InfluencerDashboard = ({ authenticatedFetch, lastNotification, user }: { authenticatedFetch: (url: string, options?: RequestInit) => Promise<Response>, lastNotification?: any, user: User }) => {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [walletData, setWalletData] = useState<any>(null);
   const [links, setLinks] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [showSuccessToast, setShowSuccessToast] = useState(false);
+  const [lastEarnings, setLastEarnings] = useState<any>(null);
 
   useEffect(() => {
     fetchData();
@@ -967,8 +969,15 @@ const InfluencerDashboard = ({ authenticatedFetch, lastNotification }: { authent
     if (lastNotification?.type === "CONVERSION") {
       fetchWallet();
       fetchLinks();
+      
+      // If it's for this influencer, show a special toast
+      if (lastNotification.influencer_id === user.id) {
+        setLastEarnings(lastNotification);
+        setShowSuccessToast(true);
+        setTimeout(() => setShowSuccessToast(false), 5000);
+      }
     }
-  }, [lastNotification]);
+  }, [lastNotification, user.id]);
 
   const fetchData = async () => {
     try {
@@ -1020,36 +1029,124 @@ const InfluencerDashboard = ({ authenticatedFetch, lastNotification }: { authent
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 relative">
+      {/* Real-time Earnings Alert */}
+      <AnimatePresence>
+        {showSuccessToast && lastEarnings && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9, y: 50 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: -20 }}
+            className="fixed bottom-8 right-8 z-[200] bg-emerald-600 text-white p-6 rounded-[32px] shadow-[0_20px_50px_rgba(5,150,105,0.3)] flex items-center gap-6 max-w-sm"
+          >
+            <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center shrink-0">
+              <Banknote size={32} className="text-white" />
+            </div>
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-emerald-100 mb-1">Commission Received!</div>
+              <div className="text-xl font-black mb-1">₦{lastEarnings.amount.toLocaleString()}</div>
+              <div className="text-xs text-emerald-50 text-balance">Earned from <span className="font-bold underline">{lastEarnings.campaign_title}</span></div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="flex justify-between items-center mb-12">
         <div>
-          <h2 className="text-3xl font-bold text-zinc-900">Influencer Dashboard</h2>
-          <p className="text-zinc-500">Pick a campaign and start earning</p>
+          <h2 className="text-3xl font-bold text-zinc-900 tracking-tight">Influencer Dashboard</h2>
+          <p className="text-zinc-500">Pick a campaign and start earning commissions</p>
         </div>
-        <div className="bg-white px-6 py-3 rounded-2xl shadow-sm border border-zinc-100">
-          <div className="text-[10px] font-bold text-zinc-400 uppercase">Total Earnings</div>
-          <div className="text-xl font-bold text-emerald-600">₦{walletData?.influencer?.walletBalance?.toLocaleString() || "0"}</div>
+        <div className="bg-white px-8 py-4 rounded-[32px] shadow-sm border border-zinc-100 flex items-center gap-4">
+          <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600">
+            <Wallet size={20} />
+          </div>
+          <div>
+            <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Available Wallet</div>
+            <div className="text-xl font-black text-emerald-600">₦{walletData?.influencer?.walletBalance?.toLocaleString() || "0"}</div>
+          </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {campaigns.map((c) => {
-          const hasLink = links.some(l => l.campaignId === c.id);
-          return (
-            <div key={c.id} className="bg-white p-8 rounded-3xl border border-zinc-100 shadow-sm">
-              <h4 className="text-xl font-bold text-zinc-900 mb-4">{c.title}</h4>
-              <p className="text-sm text-zinc-500 mb-8">{c.description}</p>
-              <div className="flex justify-between items-center pt-6 border-t border-zinc-50">
-                <div className="text-lg font-bold text-emerald-600">₦{c.payout_per_lead}/lead</div>
-                {hasLink ? (
-                  <button onClick={() => copyToClipboard(links.find(l => l.campaignId === c.id).shortCode)} className="bg-emerald-600 text-white px-6 py-2 rounded-xl text-xs font-bold">Copy Link</button>
-                ) : (
-                  <button onClick={() => handleGetLink(c.id)} className="bg-zinc-900 text-white px-6 py-2 rounded-xl text-xs font-bold">Join Campaign</button>
-                )}
-              </div>
-            </div>
-          );
-        })}
+      <div className="bg-white rounded-[40px] border border-zinc-100 shadow-sm overflow-hidden">
+        <div className="px-8 py-6 border-b border-zinc-100 bg-zinc-50/50 flex justify-between items-center">
+          <h3 className="font-bold text-zinc-900 flex items-center gap-2">
+            <Megaphone size={18} className="text-emerald-600" />
+            Available Campaigns
+          </h3>
+          <span className="text-xs font-bold text-zinc-400">{campaigns.length} Opportunities</span>
+        </div>
+        
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="border-b border-zinc-100">
+                <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">Campaign</th>
+                <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">Commission</th>
+                <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">Status</th>
+                <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-50">
+              {campaigns.map((c) => {
+                const linkObj = links.find(l => l.campaignId === c.id);
+                const hasLink = !!linkObj;
+                
+                return (
+                  <tr key={c.id} className="hover:bg-zinc-50/50 transition-colors group">
+                    <td className="px-8 py-6">
+                      <div className="font-bold text-zinc-900 mb-1">{c.title}</div>
+                      <div className="text-xs text-zinc-500 line-clamp-1">{c.description}</div>
+                    </td>
+                    <td className="px-8 py-6">
+                      <div className="flex items-center gap-2">
+                        <span className="text-emerald-600 font-bold">₦{c.payout_per_lead.toLocaleString()}</span>
+                        <span className="text-[10px] text-zinc-400 font-medium">per lead</span>
+                      </div>
+                    </td>
+                    <td className="px-8 py-6">
+                      {hasLink ? (
+                        <div className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                          <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">Active</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-zinc-300" />
+                          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Available</span>
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-8 py-6 text-right">
+                      {hasLink ? (
+                        <button 
+                          onClick={() => copyToClipboard(linkObj.shortCode)}
+                          className="inline-flex items-center gap-2 bg-emerald-50 text-emerald-600 px-4 py-2 rounded-xl text-xs font-bold hover:bg-emerald-600 hover:text-white transition-all"
+                        >
+                          <Copy size={14} />
+                          Copy Link
+                        </button>
+                      ) : (
+                        <button 
+                          disabled={loading}
+                          onClick={() => handleGetLink(c.id)}
+                          className="inline-flex items-center gap-2 bg-zinc-900 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-zinc-800 transition-all disabled:opacity-50"
+                        >
+                          <Plus size={14} />
+                          Join Campaign
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {campaigns.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-8 py-20 text-center text-zinc-400 italic">No available campaigns found. Check back soon!</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
@@ -1253,7 +1350,7 @@ export default function App() {
             )}
             {activeView === "influencer" && user && (user.role === "INFLUENCER" || user.role === "ADMIN") && (
               <motion.div key="influencer" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                <InfluencerDashboard authenticatedFetch={authenticatedFetch} lastNotification={notifications[0]} />
+                <InfluencerDashboard authenticatedFetch={authenticatedFetch} lastNotification={notifications[0]} user={user} />
               </motion.div>
             )}
             {activeView === "admin" && user && user.role === "ADMIN" && (
