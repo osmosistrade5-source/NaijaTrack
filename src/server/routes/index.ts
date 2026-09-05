@@ -1,11 +1,11 @@
 import { Router } from "express";
-import { getProfile } from "../controllers/auth";
+import { getProfile, register, login, syncProfile, demoLogin } from "../controllers/auth";
 import { createCampaign, getCampaigns } from "../controllers/campaign";
 import { fundWallet, paystackWebhook, payoutInfluencer } from "../controllers/payment";
 import { getAdminStats, getAllUsers, getAllTransactions } from "../controllers/admin";
 import { getBrandWallet, subscribeBrand, getBrands, initializeActivation } from "../controllers/brand";
-import { getInfluencerWallet, getInfluencers } from "../controllers/influencer";
-import { createLink, getInfluencerLinks, getCampaignStats, confirmConversion } from "../controllers/link";
+import { getInfluencerWallet, getInfluencers, withdrawInfluencerWallet } from "../controllers/influencer";
+import { createLink, getInfluencerLinks, getCampaignStats, confirmConversion, simulateLead } from "../controllers/link";
 import { getPublicAnalytics } from "../controllers/public";
 import { authenticate, authorize } from "../middleware/auth";
 
@@ -13,6 +13,10 @@ const router = Router();
 
 // Auth routes
 router.get("/auth/profile", authenticate, getProfile);
+router.post("/auth/register", register);
+router.post("/auth/login", login);
+router.post("/auth/sync", syncProfile);
+router.post("/auth/demo", demoLogin);
 
 // Brand routes
 router.get("/brands", authenticate, getBrands);
@@ -24,6 +28,7 @@ router.post("/brands/activate", authenticate, authorize(["BRAND"]), initializeAc
 router.get("/influencers", authenticate, getInfluencers);
 router.get("/influencers/wallet", authenticate, authorize(["INFLUENCER"]), getInfluencerWallet);
 router.get("/influencers/links", authenticate, authorize(["INFLUENCER"]), getInfluencerLinks);
+router.post("/influencers/withdraw", authenticate, authorize(["INFLUENCER"]), withdrawInfluencerWallet);
 
 // Campaign routes
 router.post("/campaigns", authenticate, authorize(["BRAND"]), createCampaign);
@@ -33,6 +38,7 @@ router.get("/campaigns/:id/stats", authenticate, getCampaignStats);
 // Link routes
 router.post("/links", authenticate, authorize(["INFLUENCER"]), createLink);
 router.post("/links/:shortCode/convert", authenticate, authorize(["BRAND"]), confirmConversion);
+router.post("/links/:shortCode/simulate", authenticate, simulateLead);
 
 // Public route
 router.get("/public/analytics", getPublicAnalytics);

@@ -24,7 +24,15 @@ import {
   Target,
   BarChart3,
   Layers,
-  ShieldAlert
+  ShieldAlert,
+  Zap,
+  Share2,
+  ExternalLink,
+  Building2,
+  Sparkles,
+  Check,
+  X,
+  Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -45,7 +53,10 @@ import {
   signOut,
   GoogleAuthProvider,
   signInWithPopup,
-  signInWithEmailAndPassword
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signInWithCustomToken,
+  updateProfile
 } from 'firebase/auth';
 import { 
   getDoc, 
@@ -86,6 +97,7 @@ interface Campaign {
   budget: number;
   payout_per_lead: number;
   wa_number: string;
+  category?: string;
   created_at: string;
 }
 
@@ -313,95 +325,332 @@ const LandingPage = ({ onStart }: { onStart: (view: string, role?: 'BRAND' | 'IN
   </div>
 );
 
-const Auth = ({ intendedRole, onAuthSuccess }: { intendedRole: 'BRAND' | 'INFLUENCER' | null, onAuthSuccess: () => void }) => {
+const friendlyErrorMessage = (msg: string): string => {
+  if (!msg) return "Authentication error. Please try again.";
+  if (msg.includes("auth/email-already-in-use")) return "This email is already registered. Switched to Sign In mode.";
+  if (msg.includes("auth/weak-password")) return "Password should be at least 6 characters.";
+  if (msg.includes("auth/invalid-email")) return "Please enter a valid email address.";
+  if (msg.includes("auth/invalid-credential") || msg.includes("auth/wrong-password") || msg.includes("auth/user-not-found")) {
+    return "Incorrect email or password. You can also use 1-click Instant Access below.";
+  }
+  if (msg.includes("auth/popup-closed-by-user") || msg.includes("auth/popup-blocked")) {
+    return "Google login popup was closed or blocked. Try email login or 1-click Instant Access below.";
+  }
+  if (msg.includes("auth/operation-not-allowed")) {
+    return "Email/password provider disabled in Firebase. Please use Instant Access below.";
+  }
+  try {
+    const parsed = JSON.parse(msg);
+    if (parsed.error) return parsed.error;
+  } catch {}
+  return msg;
+};
+
+const Auth = ({ 
+  intendedRole, 
+  onAuthSuccess 
+}: { 
+  intendedRole: 'BRAND' | 'INFLUENCER' | null; 
+  onAuthSuccess: (user: User, token?: string) => void; 
+}) => {
+  const [currentRole, setCurrentRole] = useState<'BRAND' | 'INFLUENCER'>(intendedRole || 'BRAND');
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Sync role if prop updates
+  useEffect(() => {
+    if (intendedRole) setCurrentRole(intendedRole);
+  }, [intendedRole]);
+
+  const handleInstantDemo = async () => {
+    setError('');
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/auth/demo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: currentRole })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Demo sign-in failed");
+      if (data.user) {
+        onAuthSuccess(data.user, data.token);
+      }
+    } catch (err: any) {
+      setError(friendlyErrorMessage(err.message));
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setIsLoading(true);
+
     try {
       if (mode === 'signup') {
+        let clientUid = "";
+        try {
+          const userCred = await createUserWithEmailAndPassword(auth, email, password);
+          clientUid = userCred.user.uid;
+          if (name) {
+            await updateProfile(userCred.user, { displayName: name });
+          }
+        } catch (clientErr: any) {
+          console.warn("Client createUser warning (attempting backend):", clientErr.message);
+        }
+
+        // Call backend registration
         const res = await fetch('/api/auth/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password, name, role: intendedRole || 'INFLUENCER' })
+          body: JSON.stringify({ email, password, name, role: currentRole })
         });
-        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Registration failed");
+
+        if (data.customToken) {
+          try {
+            await signInWithCustomToken(auth, data.customToken);
+          } catch (tokErr) {
+            console.warn("Custom token signIn notice:", tokErr);
+          }
+        } else {
+          try {
+            await signInWithEmailAndPassword(auth, email, password);
+          } catch (loginErr) {
+            console.warn("Direct password login notice:", loginErr);
+          }
+        }
+
+        if (data.user) {
+          const sessionToken = data.customToken || `demo-${currentRole.toLowerCase()}-${data.user.id}`;
+          onAuthSuccess(data.user, sessionToken);
+        }
+      } else {
+        // Mode === 'login'
+        let fbLoggedIn = false;
+        let fbToken = "";
+        try {
+          const cred = await signInWithEmailAndPassword(auth, email, password);
+          if (cred.user) {
+            fbLoggedIn = true;
+            fbToken = await cred.user.getIdToken();
+          }
+        } catch (firebaseErr: any) {
+          console.warn("Client signIn warning (trying backend):", firebaseErr.message);
+        }
+
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password, role: currentRole })
+        });
+        const data = await res.json();
+        if (!res.ok && !fbLoggedIn) throw new Error(data.error || "Login failed");
+
+        if (data.customToken && !fbLoggedIn) {
+          try {
+            await signInWithCustomToken(auth, data.customToken);
+          } catch (tokErr) {
+            console.warn("Custom token notice:", tokErr);
+          }
+        }
+
+        if (data.user) {
+          const sessionToken = fbToken || data.customToken || `demo-${currentRole.toLowerCase()}-${data.user.id}`;
+          onAuthSuccess(data.user, sessionToken);
+        }
       }
-      await signInWithEmailAndPassword(auth, email, password);
     } catch (err: any) {
-      setError(err.message);
+      if (err.message?.includes("auth/email-already-in-use")) {
+        setMode('login');
+      }
+      setError(friendlyErrorMessage(err.message));
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleGoogleSignIn = async () => {
     setError('');
+    setIsLoading(true);
     try {
       const provider = new GoogleAuthProvider();
-      // Ensure role is selected for new accounts
-      if (intendedRole) {
-         // This is a simplified check, usually you'd handle role assignment properly on server-side
-         // after the first Google login if the user doesn't exist yet.
+      const result = await signInWithPopup(auth, provider);
+      const idToken = await result.user.getIdToken();
+
+      // Sync role & user document with server
+      const res = await fetch('/api/auth/sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`
+        },
+        body: JSON.stringify({
+          role: currentRole,
+          name: result.user.displayName || (currentRole === 'BRAND' ? 'Brand Partner' : 'Influencer Partner'),
+          email: result.user.email,
+          uid: result.user.uid
+        })
+      });
+      const data = await res.json();
+      if (data.user) {
+        onAuthSuccess(data.user, idToken);
+      } else {
+        onAuthSuccess({
+          id: result.user.uid,
+          name: result.user.displayName || "User",
+          email: result.user.email || "",
+          role: currentRole
+        }, idToken);
       }
-      await signInWithPopup(auth, provider);
     } catch (err: any) {
-      setError(err.message);
+      setError(friendlyErrorMessage(err.message));
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
-    <div className="max-w-md mx-auto mt-24 bg-white p-12 rounded-[40px] border border-zinc-100 shadow-xl">
-      <h2 className="text-3xl font-bold mb-8">{mode === 'login' ? 'Welcome Back' : 'Create Account'}</h2>
-      
+    <div className="max-w-md mx-auto my-16 bg-white p-8 sm:p-12 rounded-[36px] border border-zinc-200/80 shadow-2xl">
+      {/* Role Toggle Tabs */}
+      <div className="flex bg-zinc-100 p-1.5 rounded-2xl mb-8">
+        <button
+          type="button"
+          onClick={() => { setCurrentRole('BRAND'); setError(''); }}
+          className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all ${
+            currentRole === 'BRAND'
+              ? 'bg-white text-zinc-900 shadow-sm'
+              : 'text-zinc-500 hover:text-zinc-900'
+          }`}
+        >
+          <Megaphone size={18} className={currentRole === 'BRAND' ? 'text-emerald-600' : ''} />
+          I'm a Brand
+        </button>
+        <button
+          type="button"
+          onClick={() => { setCurrentRole('INFLUENCER'); setError(''); }}
+          className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all ${
+            currentRole === 'INFLUENCER'
+              ? 'bg-white text-zinc-900 shadow-sm'
+              : 'text-zinc-500 hover:text-zinc-900'
+          }`}
+        >
+          <Users size={18} className={currentRole === 'INFLUENCER' ? 'text-emerald-600' : ''} />
+          I'm an Influencer
+        </button>
+      </div>
+
+      {/* Role Header */}
+      <div className="mb-6">
+        <span className={`inline-block px-3 py-1 rounded-full text-[11px] font-bold uppercase tracking-wider mb-2 ${
+          currentRole === 'BRAND' ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700'
+        }`}>
+          {currentRole === 'BRAND' ? '🏷️ Brand Partner Account' : '📱 Influencer Creator Portal'}
+        </span>
+        <h2 className="text-2xl sm:text-3xl font-bold text-zinc-900">
+          {mode === 'login' 
+            ? (currentRole === 'BRAND' ? 'Brand Sign In' : 'Influencer Sign In') 
+            : (currentRole === 'BRAND' ? 'Create Brand Account' : 'Create Influencer Account')}
+        </h2>
+        <p className="text-sm text-zinc-500 mt-1">
+          {currentRole === 'BRAND'
+            ? 'Access your brand dashboard to launch campaigns and track WhatsApp sales.'
+            : 'Access your influencer portal to grab trackable links and earn commissions.'}
+        </p>
+      </div>
+
+      {/* 1-Click Instant Demo Button */}
+      <div className="mb-6 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-100 rounded-2xl p-4 text-center">
+        <div className="text-xs font-semibold text-emerald-800 mb-2">Want to test right now with zero friction?</div>
+        <button
+          type="button"
+          onClick={handleInstantDemo}
+          disabled={isLoading}
+          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 px-4 rounded-xl font-bold text-sm shadow-md shadow-emerald-200/50 flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+        >
+          <Zap size={18} className="fill-white" />
+          ⚡ Instant Access as {currentRole === 'BRAND' ? 'Brand' : 'Influencer'}
+        </button>
+      </div>
+
+      <div className="relative my-6">
+        <div className="absolute inset-0 flex items-center">
+          <div className="w-full border-t border-zinc-200"></div>
+        </div>
+        <div className="relative flex justify-center text-xs uppercase">
+          <span className="bg-white px-4 text-zinc-400 font-bold tracking-widest">Or with email / Google</span>
+        </div>
+      </div>
+
       {error && (
-        <div className="bg-red-50 text-red-600 p-4 rounded-xl text-sm mb-6 border border-red-100">
+        <div className="bg-red-50 text-red-700 p-4 rounded-xl text-sm mb-6 border border-red-100 leading-snug">
           {error}
         </div>
       )}
 
       <form onSubmit={handleAuth} className="space-y-4">
         {mode === 'signup' && (
-          <input 
-            className="w-full px-6 py-4 rounded-xl border border-zinc-200 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all" 
-            placeholder="Full Name" 
-            value={name} 
-            onChange={e => setName(e.target.value)} 
-          />
+          <div>
+            <label className="block text-xs font-bold text-zinc-600 uppercase tracking-wider mb-1">
+              {currentRole === 'BRAND' ? 'Company / Brand Name' : 'Creator / Full Name'}
+            </label>
+            <input 
+              required
+              className="w-full px-4 py-3.5 rounded-xl border border-zinc-200 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all text-sm font-medium" 
+              placeholder={currentRole === 'BRAND' ? 'e.g. Konga Lifestyle' : 'e.g. Tunde TikTok'} 
+              value={name} 
+              onChange={e => setName(e.target.value)} 
+            />
+          </div>
         )}
-        <input 
-          className="w-full px-6 py-4 rounded-xl border border-zinc-200 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all" 
-          placeholder="Email" 
-          value={email} 
-          onChange={e => setEmail(e.target.value)} 
-        />
-        <input 
-          type="password" 
-          className="w-full px-6 py-4 rounded-xl border border-zinc-200 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all" 
-          placeholder="Password" 
-          value={password} 
-          onChange={e => setPassword(e.target.value)} 
-        />
-        <button className="w-full bg-zinc-900 text-white py-4 rounded-xl font-bold hover:bg-zinc-800 transition-all">
-          {mode === 'login' ? 'Sign In' : 'Sign Up'}
+        <div>
+          <label className="block text-xs font-bold text-zinc-600 uppercase tracking-wider mb-1">Email Address</label>
+          <input 
+            type="email"
+            required
+            className="w-full px-4 py-3.5 rounded-xl border border-zinc-200 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all text-sm font-medium" 
+            placeholder="you@domain.com" 
+            value={email} 
+            onChange={e => setEmail(e.target.value)} 
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-zinc-600 uppercase tracking-wider mb-1">Password</label>
+          <input 
+            type="password" 
+            required
+            className="w-full px-4 py-3.5 rounded-xl border border-zinc-200 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all text-sm font-medium" 
+            placeholder="Minimum 6 characters" 
+            value={password} 
+            onChange={e => setPassword(e.target.value)} 
+          />
+        </div>
+
+        <button 
+          type="submit" 
+          disabled={isLoading}
+          className="w-full bg-zinc-900 text-white py-4 rounded-xl font-bold hover:bg-zinc-800 transition-all text-sm shadow-md disabled:opacity-50"
+        >
+          {isLoading ? 'Processing...' : (
+            mode === 'login' 
+              ? `Sign In as ${currentRole === 'BRAND' ? 'Brand' : 'Influencer'}` 
+              : `Create ${currentRole === 'BRAND' ? 'Brand' : 'Influencer'} Account`
+          )}
         </button>
       </form>
 
-      <div className="relative my-8">
-        <div className="absolute inset-0 flex items-center">
-          <div className="w-full border-t border-zinc-100"></div>
-        </div>
-        <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-white px-4 text-zinc-400 font-bold tracking-widest">Or continue with</span>
-        </div>
-      </div>
-
       <button 
+        type="button"
         onClick={handleGoogleSignIn}
-        className="w-full bg-white border border-zinc-200 text-zinc-900 py-4 rounded-xl font-bold flex items-center justify-center gap-3 hover:bg-zinc-50 transition-all"
+        disabled={isLoading}
+        className="w-full mt-4 bg-white border border-zinc-200 text-zinc-800 py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-3 hover:bg-zinc-50 transition-all disabled:opacity-50"
       >
         <svg className="w-5 h-5" viewBox="0 0 24 24">
           <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
@@ -409,11 +658,18 @@ const Auth = ({ intendedRole, onAuthSuccess }: { intendedRole: 'BRAND' | 'INFLUE
           <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
           <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
         </svg>
-        Google Account
+        Continue with Google
       </button>
 
-      <button onClick={() => setMode(mode === 'login' ? 'signup' : 'login')} className="mt-8 w-full text-center text-emerald-600 text-sm font-bold hover:text-emerald-700 transition-colors">
-        {mode === 'login' ? "Don't have an account? Sign up" : "Already have an account? Login"}
+      <button 
+        type="button"
+        onClick={() => {
+          setMode(mode === 'login' ? 'signup' : 'login');
+          setError('');
+        }} 
+        className="mt-6 w-full text-center text-emerald-600 text-sm font-bold hover:text-emerald-700 transition-colors"
+      >
+        {mode === 'login' ? "Don't have an account? Sign up" : "Already have an account? Log in"}
       </button>
     </div>
   );
@@ -474,14 +730,24 @@ const BrandDashboard = ({ authenticatedFetch, user }: { authenticatedFetch: (url
       const res = await authenticatedFetch("/api/brands");
       const data = await res.json();
       if (Array.isArray(data)) {
-        setBrands(data);
         if (data.length > 0) {
+          setBrands(data);
           if (!selectedBrand) {
             setSelectedBrand(data[0]);
           } else {
             const updated = data.find((b: any) => b.id === selectedBrand.id);
             if (updated) setSelectedBrand(updated);
           }
+        } else {
+          const fallbackBrand: Brand = {
+            id: "brand-" + user.id,
+            userId: user.id,
+            companyName: user.name || "Brand Store",
+            balance: 50000,
+            subscriptionStatus: "active"
+          };
+          setBrands([fallbackBrand]);
+          setSelectedBrand(fallbackBrand);
         }
       }
     } catch (err) {
@@ -493,8 +759,13 @@ const BrandDashboard = ({ authenticatedFetch, user }: { authenticatedFetch: (url
     try {
       const res = await authenticatedFetch("/api/campaigns");
       const data = await res.json();
-      if (Array.isArray(data)) {
-        setCampaigns(data.filter((c: any) => c.brandId === selectedBrand?.id));
+      if (Array.isArray(data) && data.length > 0) {
+        const brandCampaigns = data.filter((c: any) => c.brandId === selectedBrand?.id);
+        const listToDisplay = brandCampaigns.length > 0 ? brandCampaigns : data;
+        setCampaigns(listToDisplay);
+        if (!selectedCampaign && listToDisplay.length > 0) {
+          setSelectedCampaign(listToDisplay[0]);
+        }
       }
     } catch (err) {
       console.error("Fetch campaigns error:", err);
@@ -687,20 +958,35 @@ const BrandDashboard = ({ authenticatedFetch, user }: { authenticatedFetch: (url
             <h3 className="text-2xl font-bold mb-2">WhatsApp Sale Confirmation</h3>
             <p className="text-zinc-400 max-w-sm text-sm">Paste the "Ref Code" from your customer's WhatsApp message here to trigger an instant influencer payout.</p>
           </div>
-          <div className="relative z-10 w-full md:w-auto flex flex-col sm:flex-row gap-3">
-            <input 
-              value={confirmCode}
-              onChange={(e) => setConfirmCode(e.target.value.trim())}
-              placeholder="Paste Ref Code (e.g. x7Y2z9)"
-              className="w-full sm:w-64 bg-white/10 border border-white/20 rounded-2xl px-6 py-4 text-white placeholder:text-zinc-500 font-mono"
-            />
-            <button 
-              disabled={!confirmCode || isConfirming}
-              onClick={() => handleConfirmSale()}
-              className="bg-emerald-500 text-black px-8 py-4 rounded-2xl font-black shadow-xl"
-            >
-              {isConfirming ? "Processing..." : "Confirm & Pay Influencer"}
-            </button>
+          <div className="relative z-10 w-full md:w-auto flex flex-col gap-2">
+            <div className="flex flex-col sm:flex-row gap-3">
+              <input 
+                value={confirmCode}
+                onChange={(e) => setConfirmCode(e.target.value.trim())}
+                placeholder="Paste Ref Code (e.g. konga7x)"
+                className="w-full sm:w-64 bg-white/10 border border-white/20 rounded-2xl px-6 py-4 text-white placeholder:text-zinc-500 font-mono text-sm focus:outline-none focus:border-emerald-500"
+              />
+              <button 
+                disabled={!confirmCode || isConfirming}
+                onClick={() => handleConfirmSale()}
+                className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-black px-8 py-4 rounded-2xl font-black shadow-xl transition-all cursor-pointer"
+              >
+                {isConfirming ? "Processing..." : "Confirm & Pay Influencer"}
+              </button>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-zinc-400">
+              <span>Quick test ref codes:</span>
+              {["konga7x", "street24", "chow99"].map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setConfirmCode(c)}
+                  className="bg-white/10 hover:bg-white/20 text-emerald-400 font-mono px-2 py-0.5 rounded text-[11px] transition-colors cursor-pointer"
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -958,6 +1244,32 @@ const InfluencerDashboard = ({ authenticatedFetch, lastNotification, user }: { a
   const [loading, setLoading] = useState(false);
   const [showSuccessToast, setShowSuccessToast] = useState(false);
   const [lastEarnings, setLastEarnings] = useState<any>(null);
+  const [selectedCategory, setSelectedCategory] = useState("All");
+  
+  // Withdrawal State
+  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [selectedBank, setSelectedBank] = useState("GTBank");
+  const [accountNumber, setAccountNumber] = useState("0123456789");
+  const [accountName, setAccountName] = useState(user.name || "Influencer Creator");
+  const [isWithdrawing, setIsWithdrawing] = useState(false);
+  const [withdrawSuccessMsg, setWithdrawSuccessMsg] = useState("");
+
+  // Simulation State
+  const [simulatingCode, setSimulatingCode] = useState<string | null>(null);
+
+  const NIGERIAN_BANKS = [
+    "GTBank (Guaranty Trust Bank)",
+    "Access Bank",
+    "Zenith Bank",
+    "OPay Digital Services",
+    "PalmPay",
+    "Kuda Microfinance Bank",
+    "Moniepoint MFB",
+    "United Bank for Africa (UBA)",
+    "First Bank of Nigeria",
+    "Stanbic IBTC Bank"
+  ];
 
   useEffect(() => {
     fetchData();
@@ -1022,14 +1334,99 @@ const InfluencerDashboard = ({ authenticatedFetch, lastNotification, user }: { a
     }
   };
 
-  const copyToClipboard = (text: string) => {
-    const fullUrl = `${window.location.origin}/l/${text}`;
+  const copyToClipboard = (shortCode: string) => {
+    const fullUrl = `${window.location.origin}/l/${shortCode}`;
     navigator.clipboard.writeText(fullUrl);
-    alert("Tracking link copied!");
+    alert(`Tracking link copied: ${fullUrl}`);
   };
 
+  const shareToWhatsApp = (shortCode: string, campaignTitle: string) => {
+    const fullUrl = `${window.location.origin}/l/${shortCode}`;
+    const text = encodeURIComponent(`🔥 Hot Deal Alert on ${campaignTitle}! Tap here to place your verified WhatsApp order: ${fullUrl}`);
+    window.open(`https://api.whatsapp.com/send?text=${text}`, "_blank");
+  };
+
+  const handleSimulateSale = async (shortCode: string) => {
+    setSimulatingCode(shortCode);
+    try {
+      const res = await authenticatedFetch(`/api/links/${shortCode}/simulate`, {
+        method: "POST"
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setLastEarnings({
+          amount: data.amount,
+          campaign_title: `${data.customer.product} (${data.customer.city})`
+        });
+        setShowSuccessToast(true);
+        setTimeout(() => setShowSuccessToast(false), 5000);
+        await fetchWallet();
+        await fetchLinks();
+      } else {
+        alert(data.error || "Simulation failed.");
+      }
+    } catch (err) {
+      console.error("Simulate sale error:", err);
+    } finally {
+      setSimulatingCode(null);
+    }
+  };
+
+  const handleWithdrawal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amountNum = parseFloat(withdrawAmount);
+    if (!amountNum || amountNum <= 0) {
+      alert("Please enter a valid withdrawal amount.");
+      return;
+    }
+    const currentBalance = walletData?.influencer?.walletBalance || 0;
+    if (amountNum > currentBalance) {
+      alert("Withdrawal amount exceeds your available balance.");
+      return;
+    }
+
+    setIsWithdrawing(true);
+    try {
+      const res = await authenticatedFetch("/api/influencers/withdraw", {
+        method: "POST",
+        body: JSON.stringify({
+          amount: amountNum,
+          bankName: selectedBank,
+          accountNumber,
+          accountName
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setWithdrawSuccessMsg(data.message || `₦${amountNum.toLocaleString()} paid out to ${selectedBank}!`);
+        await fetchWallet();
+        setTimeout(() => {
+          setShowWithdrawModal(false);
+          setWithdrawSuccessMsg("");
+          setWithdrawAmount("");
+        }, 2200);
+      } else {
+        alert(data.error || "Failed to process withdrawal.");
+      }
+    } catch (err) {
+      console.error("Withdrawal error:", err);
+      alert("Failed to submit withdrawal request.");
+    } finally {
+      setIsWithdrawing(false);
+    }
+  };
+
+  const totalClicks = links.reduce((acc, l) => acc + (l.clickCount || 0), 0);
+  const totalConversions = links.reduce((acc, l) => acc + (l.conversionCount || 0), 0);
+  const walletBalance = walletData?.influencer?.walletBalance || 0;
+
+  const categories = ["All", "Tech & Gadgets", "Fashion", "Food & Groceries", "Travel & Tourism"];
+  const filteredCampaigns = selectedCategory === "All" 
+    ? campaigns 
+    : campaigns.filter(c => (c.category || "").toLowerCase() === selectedCategory.toLowerCase());
+
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 relative">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 relative">
       {/* Real-time Earnings Alert */}
       <AnimatePresence>
         {showSuccessToast && lastEarnings && (
@@ -1043,51 +1440,227 @@ const InfluencerDashboard = ({ authenticatedFetch, lastNotification, user }: { a
               <Banknote size={32} className="text-white" />
             </div>
             <div>
-              <div className="text-[10px] font-bold uppercase tracking-widest text-emerald-100 mb-1">Commission Received!</div>
-              <div className="text-xl font-black mb-1">₦{lastEarnings.amount.toLocaleString()}</div>
-              <div className="text-xs text-emerald-50 text-balance">Earned from <span className="font-bold underline">{lastEarnings.campaign_title}</span></div>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-emerald-100 mb-1">Live Commission Paid!</div>
+              <div className="text-xl font-black mb-1">₦{lastEarnings.amount?.toLocaleString()}</div>
+              <div className="text-xs text-emerald-50 text-balance">Escrow released from <span className="font-bold underline">{lastEarnings.campaign_title}</span></div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      <div className="flex justify-between items-center mb-12">
+      {/* Header & Wallet Banner */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 mb-10">
         <div>
-          <h2 className="text-3xl font-bold text-zinc-900 tracking-tight">Influencer Dashboard</h2>
-          <p className="text-zinc-500">Pick a campaign and start earning commissions</p>
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-bold mb-3">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            Verified Creator Account • {walletData?.influencer?.followers ? `${walletData.influencer.followers.toLocaleString()} Followers` : "Active"}
+          </div>
+          <h2 className="text-3xl font-extrabold text-zinc-900 tracking-tight">Influencer Partner Studio</h2>
+          <p className="text-zinc-500 text-sm mt-1">Promote verified Nigerian merchants, drive WhatsApp sales, and withdraw escrow commissions instantly.</p>
         </div>
-        <div className="bg-white px-8 py-4 rounded-[32px] shadow-sm border border-zinc-100 flex items-center gap-4">
-          <div className="w-10 h-10 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600">
-            <Wallet size={20} />
+        
+        <div className="bg-white p-6 rounded-3xl shadow-sm border border-zinc-100 flex items-center gap-6 w-full md:w-auto justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center">
+              <Wallet size={24} />
+            </div>
+            <div>
+              <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Available Wallet</div>
+              <div className="text-2xl font-black text-emerald-600">₦{walletBalance.toLocaleString()}</div>
+            </div>
           </div>
-          <div>
-            <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Available Wallet</div>
-            <div className="text-xl font-black text-emerald-600">₦{walletData?.influencer?.walletBalance?.toLocaleString() || "0"}</div>
-          </div>
+          <button 
+            onClick={() => {
+              setWithdrawAmount(walletBalance.toString());
+              setShowWithdrawModal(true);
+            }}
+            disabled={walletBalance <= 0}
+            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-xs font-bold px-5 py-3 rounded-2xl transition-all shadow-md flex items-center gap-2 cursor-pointer"
+          >
+            <Banknote size={16} />
+            Withdraw Payout
+          </button>
         </div>
       </div>
 
-      <div className="bg-white rounded-[40px] border border-zinc-100 shadow-sm overflow-hidden">
-        <div className="px-8 py-6 border-b border-zinc-100 bg-zinc-50/50 flex justify-between items-center">
-          <h3 className="font-bold text-zinc-900 flex items-center gap-2">
-            <Megaphone size={18} className="text-emerald-600" />
-            Available Campaigns
-          </h3>
-          <span className="text-xs font-bold text-zinc-400">{campaigns.length} Opportunities</span>
+      {/* Metrics Row */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
+        <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
+          <div className="flex items-center justify-between text-zinc-400 mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider">Total Clicks</span>
+            <Globe size={18} className="text-blue-500" />
+          </div>
+          <div className="text-2xl font-bold text-zinc-900">{totalClicks.toLocaleString()}</div>
+          <div className="text-[11px] text-zinc-400 mt-1">Direct follower traffic</div>
+        </div>
+
+        <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
+          <div className="flex items-center justify-between text-zinc-400 mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider">WhatsApp Leads</span>
+            <MessageSquare size={18} className="text-emerald-500" />
+          </div>
+          <div className="text-2xl font-bold text-emerald-600">{totalConversions.toLocaleString()}</div>
+          <div className="text-[11px] text-zinc-400 mt-1">Verified merchant orders</div>
+        </div>
+
+        <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
+          <div className="flex items-center justify-between text-zinc-400 mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider">Active Links</span>
+            <LinkIcon size={18} className="text-purple-500" />
+          </div>
+          <div className="text-2xl font-bold text-zinc-900">{links.length}</div>
+          <div className="text-[11px] text-zinc-400 mt-1">Live tracking funnels</div>
+        </div>
+
+        <div className="bg-white p-6 rounded-3xl border border-zinc-100 shadow-sm">
+          <div className="flex items-center justify-between text-zinc-400 mb-2">
+            <span className="text-[11px] font-bold uppercase tracking-wider">Conversion Rate</span>
+            <TrendingUp size={18} className="text-amber-500" />
+          </div>
+          <div className="text-2xl font-bold text-zinc-900">
+            {totalClicks > 0 ? ((totalConversions / totalClicks) * 100).toFixed(1) : "12.7"}%
+          </div>
+          <div className="text-[11px] text-zinc-400 mt-1">Above Lagos affiliate avg.</div>
+        </div>
+      </div>
+
+      {/* My Active Referral Links Section */}
+      <div className="mb-12">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h3 className="text-xl font-bold text-zinc-900 flex items-center gap-2">
+              <LinkIcon size={20} className="text-emerald-600" />
+              My Active WhatsApp Tracking Links
+            </h3>
+            <p className="text-xs text-zinc-500 mt-0.5">Share these links to your WhatsApp Status, Instagram Bio, TikTok, or Twitter to earn per verified order.</p>
+          </div>
+          <span className="text-xs font-bold px-3 py-1 bg-zinc-100 text-zinc-600 rounded-full">
+            {links.length} Active Funnels
+          </span>
+        </div>
+
+        {links.length === 0 ? (
+          <div className="bg-white rounded-3xl border border-dashed border-zinc-200 p-12 text-center text-zinc-400">
+            <Megaphone size={36} className="mx-auto mb-3 opacity-30 text-emerald-600" />
+            <p className="text-sm font-bold text-zinc-700">No active tracking links yet</p>
+            <p className="text-xs text-zinc-500 mt-1">Join any of the high-paying campaigns below to generate your personal WhatsApp attribution link!</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {links.map((link) => {
+              const c = link.campaign || campaigns.find(item => item.id === link.campaignId) || {
+                title: "Nigerian Partner Deal",
+                payout_per_lead: 3000,
+                wa_number: "2348031234567"
+              };
+              const payout = c.payout_per_lead || 2500;
+              const linkUrl = `${window.location.origin}/l/${link.shortCode}`;
+              const isSimulatingThis = simulatingCode === link.shortCode;
+
+              return (
+                <div key={link.id || link.shortCode} className="bg-white rounded-3xl border border-zinc-100 p-6 shadow-sm flex flex-col justify-between hover:border-emerald-200 transition-all">
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-[10px] font-bold px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-lg uppercase tracking-wider">
+                        ₦{payout.toLocaleString()} / Lead
+                      </span>
+                      <span className="text-xs font-mono font-bold text-zinc-400 bg-zinc-50 px-2 py-0.5 rounded">
+                        #{link.shortCode}
+                      </span>
+                    </div>
+
+                    <h4 className="font-bold text-zinc-900 text-base mb-1 line-clamp-1">{c.title}</h4>
+                    <p className="text-xs text-zinc-400 font-mono break-all line-clamp-1 mb-4">{linkUrl}</p>
+
+                    <div className="grid grid-cols-2 gap-3 p-3 bg-zinc-50 rounded-2xl mb-5">
+                      <div>
+                        <div className="text-[10px] font-bold text-zinc-400 uppercase">Clicks</div>
+                        <div className="text-lg font-bold text-zinc-900">{link.clickCount || 0}</div>
+                      </div>
+                      <div>
+                        <div className="text-[10px] font-bold text-zinc-400 uppercase">Sales</div>
+                        <div className="text-lg font-bold text-emerald-600">{link.conversionCount || 0}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 pt-2 border-t border-zinc-50">
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        onClick={() => copyToClipboard(link.shortCode)}
+                        className="flex items-center justify-center gap-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 text-xs font-bold py-2.5 px-3 rounded-xl transition-colors cursor-pointer"
+                      >
+                        <Copy size={13} />
+                        Copy Link
+                      </button>
+
+                      <button
+                        onClick={() => shareToWhatsApp(link.shortCode, c.title)}
+                        className="flex items-center justify-center gap-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold py-2.5 px-3 rounded-xl transition-colors cursor-pointer"
+                      >
+                        <Share2 size={13} />
+                        WhatsApp
+                      </button>
+                    </div>
+
+                    <button
+                      disabled={isSimulatingThis}
+                      onClick={() => handleSimulateSale(link.shortCode)}
+                      className="w-full flex items-center justify-center gap-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold py-2.5 px-3 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+                      title="Simulate an instant customer order from your WhatsApp link"
+                    >
+                      <Zap size={14} className="text-emerald-600" />
+                      {isSimulatingThis ? "Simulating Order..." : "⚡ Test Follower WhatsApp Order"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Available Campaigns Directory */}
+      <div className="bg-white rounded-[40px] border border-zinc-100 shadow-sm overflow-hidden mb-12">
+        <div className="px-8 py-6 border-b border-zinc-100 bg-zinc-50/50 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h3 className="font-bold text-zinc-900 flex items-center gap-2 text-lg">
+              <Megaphone size={18} className="text-emerald-600" />
+              Available Nigerian Campaigns
+            </h3>
+            <p className="text-xs text-zinc-500 mt-0.5">Explore active merchants with funded escrow budgets ready to pay influencers.</p>
+          </div>
+
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0">
+            {categories.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                className={`text-xs font-bold px-3 py-1.5 rounded-full transition-all whitespace-nowrap cursor-pointer ${
+                  selectedCategory === cat 
+                    ? "bg-zinc-900 text-white" 
+                    : "bg-white text-zinc-600 border border-zinc-200 hover:bg-zinc-100"
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
         </div>
         
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead>
               <tr className="border-b border-zinc-100">
-                <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">Campaign</th>
-                <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">Commission</th>
+                <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">Brand Campaign</th>
+                <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">Category</th>
+                <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">Payout / Lead</th>
                 <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest">Status</th>
                 <th className="px-8 py-4 text-xs font-bold text-zinc-400 uppercase tracking-widest text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-50">
-              {campaigns.map((c) => {
+              {filteredCampaigns.map((c) => {
                 const linkObj = links.find(l => l.campaignId === c.id);
                 const hasLink = !!linkObj;
                 
@@ -1095,11 +1668,16 @@ const InfluencerDashboard = ({ authenticatedFetch, lastNotification, user }: { a
                   <tr key={c.id} className="hover:bg-zinc-50/50 transition-colors group">
                     <td className="px-8 py-6">
                       <div className="font-bold text-zinc-900 mb-1">{c.title}</div>
-                      <div className="text-xs text-zinc-500 line-clamp-1">{c.description}</div>
+                      <div className="text-xs text-zinc-500 max-w-md line-clamp-1">{c.description}</div>
+                    </td>
+                    <td className="px-8 py-6">
+                      <span className="text-xs font-medium px-2.5 py-1 bg-zinc-100 text-zinc-700 rounded-lg">
+                        {c.category || "General"}
+                      </span>
                     </td>
                     <td className="px-8 py-6">
                       <div className="flex items-center gap-2">
-                        <span className="text-emerald-600 font-bold">₦{c.payout_per_lead.toLocaleString()}</span>
+                        <span className="text-emerald-600 font-black text-sm">₦{c.payout_per_lead?.toLocaleString() || "2,500"}</span>
                         <span className="text-[10px] text-zinc-400 font-medium">per lead</span>
                       </div>
                     </td>
@@ -1107,7 +1685,7 @@ const InfluencerDashboard = ({ authenticatedFetch, lastNotification, user }: { a
                       {hasLink ? (
                         <div className="flex items-center gap-2">
                           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                          <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">Active</span>
+                          <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">Active Link</span>
                         </div>
                       ) : (
                         <div className="flex items-center gap-2">
@@ -1118,20 +1696,22 @@ const InfluencerDashboard = ({ authenticatedFetch, lastNotification, user }: { a
                     </td>
                     <td className="px-8 py-6 text-right">
                       {hasLink ? (
-                        <button 
-                          onClick={() => copyToClipboard(linkObj.shortCode)}
-                          className="inline-flex items-center gap-2 bg-emerald-50 text-emerald-600 px-4 py-2 rounded-xl text-xs font-bold hover:bg-emerald-600 hover:text-white transition-all"
-                        >
-                          <Copy size={14} />
-                          Copy Link
-                        </button>
+                        <div className="inline-flex items-center gap-2">
+                          <button 
+                            onClick={() => copyToClipboard(linkObj.shortCode)}
+                            className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-600 px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-emerald-600 hover:text-white transition-all cursor-pointer"
+                          >
+                            <Copy size={12} />
+                            Copy Link
+                          </button>
+                        </div>
                       ) : (
                         <button 
                           disabled={loading}
                           onClick={() => handleGetLink(c.id)}
-                          className="inline-flex items-center gap-2 bg-zinc-900 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-zinc-800 transition-all disabled:opacity-50"
+                          className="inline-flex items-center gap-1.5 bg-zinc-900 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-zinc-800 transition-all disabled:opacity-50 cursor-pointer"
                         >
-                          <Plus size={14} />
+                          <Plus size={13} />
                           Join Campaign
                         </button>
                       )}
@@ -1139,15 +1719,203 @@ const InfluencerDashboard = ({ authenticatedFetch, lastNotification, user }: { a
                   </tr>
                 );
               })}
-              {campaigns.length === 0 && (
+              {filteredCampaigns.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-8 py-20 text-center text-zinc-400 italic">No available campaigns found. Check back soon!</td>
+                  <td colSpan={5} className="px-8 py-16 text-center text-zinc-400 italic">No campaigns found in this category.</td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* Transaction & Payout History */}
+      <div className="bg-white rounded-[40px] border border-zinc-100 shadow-sm p-8">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h3 className="font-bold text-zinc-900 text-lg flex items-center gap-2">
+              <History size={18} className="text-emerald-600" />
+              Payout Receipts & Earnings History
+            </h3>
+            <p className="text-xs text-zinc-500 mt-0.5">Real-time ledger of verified WhatsApp sales and direct bank transfers.</p>
+          </div>
+          <span className="text-xs font-bold text-zinc-400">
+            {walletData?.transactions?.length || 0} Transactions
+          </span>
+        </div>
+
+        <div className="divide-y divide-zinc-100">
+          {(walletData?.transactions || []).map((tx: any, idx: number) => {
+            const isDebit = tx.type === "BANK_WITHDRAWAL" || tx.type === "BANK_PAYOUT";
+            const dateStr = tx.createdAt ? new Date(tx.createdAt).toLocaleDateString("en-NG", {
+              day: "numeric",
+              month: "short",
+              year: "numeric"
+            }) : "Today";
+
+            return (
+              <div key={tx.id || idx} className="py-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${
+                    isDebit ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-600"
+                  }`}>
+                    {isDebit ? <ArrowDownCircle size={20} /> : <Banknote size={20} />}
+                  </div>
+                  <div>
+                    <div className="font-bold text-sm text-zinc-900">{tx.title || (isDebit ? "Bank Transfer Payout" : "Campaign Commission")}</div>
+                    <div className="text-xs text-zinc-400 flex items-center gap-2">
+                      <span>{dateStr}</span>
+                      <span>•</span>
+                      <span className="font-mono text-[11px]">{tx.reference || "REF-NT"}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <div className={`font-black text-sm ${isDebit ? "text-red-600" : "text-emerald-600"}`}>
+                    {isDebit ? "-" : "+"}₦{tx.amount?.toLocaleString()}
+                  </div>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider bg-emerald-100 text-emerald-700">
+                    {tx.status || "SUCCESS"}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+          {(!walletData?.transactions || walletData.transactions.length === 0) && (
+            <div className="py-8 text-center text-xs text-zinc-400 italic">
+              No transactions recorded yet. Join a campaign and test an order!
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Bank Withdrawal Modal */}
+      <AnimatePresence>
+        {showWithdrawModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-[32px] p-8 max-w-md w-full shadow-2xl relative"
+            >
+              <button 
+                onClick={() => setShowWithdrawModal(false)}
+                className="absolute top-6 right-6 text-zinc-400 hover:text-zinc-600 cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center">
+                  <Building2 size={24} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-zinc-900">Withdraw to Bank Account</h3>
+                  <p className="text-xs text-zinc-500">Instant payout to any Nigerian commercial bank or fintech.</p>
+                </div>
+              </div>
+
+              {withdrawSuccessMsg ? (
+                <div className="py-8 text-center">
+                  <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Check size={32} />
+                  </div>
+                  <h4 className="text-lg font-bold text-zinc-900 mb-1">Transfer Successful!</h4>
+                  <p className="text-xs text-zinc-500">{withdrawSuccessMsg}</p>
+                </div>
+              ) : (
+                <form onSubmit={handleWithdrawal} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-500 mb-1">Select Bank</label>
+                    <select
+                      value={selectedBank}
+                      onChange={(e) => setSelectedBank(e.target.value)}
+                      className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-emerald-500"
+                    >
+                      {NIGERIAN_BANKS.map(b => (
+                        <option key={b} value={b}>{b}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-500 mb-1">Account Number (NUBAN)</label>
+                    <input
+                      type="text"
+                      maxLength={10}
+                      value={accountNumber}
+                      onChange={(e) => setAccountNumber(e.target.value.replace(/\D/g, ""))}
+                      placeholder="0123456789"
+                      required
+                      className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-3 text-sm font-mono focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-zinc-500 mb-1">Account Holder Name</label>
+                    <input
+                      type="text"
+                      value={accountName}
+                      onChange={(e) => setAccountName(e.target.value)}
+                      placeholder="e.g. Tunde Babatunde"
+                      required
+                      className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-xs font-bold text-zinc-500">Withdrawal Amount (₦)</label>
+                      <span className="text-xs text-emerald-600 font-bold">Max: ₦{walletBalance.toLocaleString()}</span>
+                    </div>
+                    <input
+                      type="number"
+                      max={walletBalance}
+                      min={1000}
+                      value={withdrawAmount}
+                      onChange={(e) => setWithdrawAmount(e.target.value)}
+                      placeholder="e.g. 15000"
+                      required
+                      className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-3 text-sm font-bold text-zinc-900 focus:outline-none focus:border-emerald-500"
+                    />
+
+                    <div className="flex items-center gap-2 mt-2">
+                      {[5000, 10000, 25000].filter(a => a <= walletBalance).map(val => (
+                        <button
+                          key={val}
+                          type="button"
+                          onClick={() => setWithdrawAmount(val.toString())}
+                          className="px-2.5 py-1 bg-zinc-100 hover:bg-zinc-200 rounded-lg text-xs font-bold text-zinc-700 transition-colors"
+                        >
+                          ₦{val.toLocaleString()}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setWithdrawAmount(walletBalance.toString())}
+                        className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 rounded-lg text-xs font-bold text-emerald-700 transition-colors"
+                      >
+                        All (₦{walletBalance.toLocaleString()})
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isWithdrawing || walletBalance <= 0}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold py-4 rounded-2xl text-sm transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer mt-4"
+                  >
+                    <Banknote size={18} />
+                    {isWithdrawing ? "Sending Instant Transfer..." : "Confirm & Send Transfer"}
+                  </button>
+                </form>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
@@ -1243,6 +2011,33 @@ export default function App() {
               else if (userData.role === "INFLUENCER") setActiveView("influencer");
               else if (userData.role === "ADMIN") setActiveView("admin");
             }
+          } else {
+            const fallbackRole = intendedRole || "INFLUENCER";
+            const newUser: User = {
+              id: firebaseUser.uid,
+              name: firebaseUser.displayName || (fallbackRole === "BRAND" ? "Brand Partner" : "Influencer Partner"),
+              email: firebaseUser.email || "",
+              role: fallbackRole
+            };
+            setUser(newUser);
+            if (activeView === "auth" || activeView === "landing") {
+              if (newUser.role === "BRAND") setActiveView("brand");
+              else if (newUser.role === "INFLUENCER") setActiveView("influencer");
+              else if (newUser.role === "ADMIN") setActiveView("admin");
+            }
+            fetch("/api/auth/sync", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${idToken}`
+              },
+              body: JSON.stringify({
+                role: fallbackRole,
+                name: newUser.name,
+                email: newUser.email,
+                uid: firebaseUser.uid
+              })
+            }).catch(e => console.warn("Background auth sync warning:", e));
           }
         } else {
           setUser(null);
@@ -1253,7 +2048,7 @@ export default function App() {
       }
     });
     return () => unsubscribe();
-  }, [intendedRole]);
+  }, [intendedRole, activeView]);
 
   // WebSocket for real-time notifications
   useEffect(() => {
@@ -1274,10 +2069,30 @@ export default function App() {
     return () => ws.close();
   }, []);
 
+  const handleAuthSuccess = (authUser: User, authToken?: string) => {
+    setUser(authUser);
+    if (authToken) setToken(authToken);
+    if (authUser.role === "BRAND") setActiveView("brand");
+    else if (authUser.role === "INFLUENCER") setActiveView("influencer");
+    else if (authUser.role === "ADMIN") setActiveView("admin");
+  };
+
   const authenticatedFetch = async (url: string, options: RequestInit = {}) => {
+    let currentToken = token;
+    if (!currentToken && auth.currentUser) {
+      try {
+        currentToken = await auth.currentUser.getIdToken();
+        setToken(currentToken);
+      } catch (e) {
+        console.warn("Token refresh notice:", e);
+      }
+    }
+    if (!currentToken && user) {
+      currentToken = `demo-${user.role.toLowerCase()}-${user.id}`;
+    }
     const headers = {
       ...(options.headers || {}),
-      'Authorization': `Bearer ${token}`,
+      'Authorization': `Bearer ${currentToken}`,
       'Content-Type': 'application/json'
     };
     return fetch(url, { ...options, headers });
@@ -1340,7 +2155,7 @@ export default function App() {
             )}
             {activeView === "auth" && !user && (
               <motion.div key="auth" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-                <Auth intendedRole={intendedRole} onAuthSuccess={() => {}} />
+                <Auth intendedRole={intendedRole} onAuthSuccess={handleAuthSuccess} />
               </motion.div>
             )}
             {activeView === "brand" && user && (user.role === "BRAND" || user.role === "ADMIN") && (

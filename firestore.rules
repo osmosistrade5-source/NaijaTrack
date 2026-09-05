@@ -84,7 +84,20 @@ service cloud.firestore {
       allow create: if true; // Public tracking
     }
     
-    match /test/connection {
+    match /transactions/{transactionId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /admin_wallets/{walletId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /payments/{paymentId} {
+      allow read, write: if isAdmin();
+    }
+    
+    match /test/{document=**} {
       allow read: if true;
     }
   }

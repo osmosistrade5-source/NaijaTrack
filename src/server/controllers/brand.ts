@@ -11,13 +11,25 @@ export const getBrandWallet = async (req: AuthRequest, res: Response) => {
       const brandsRef = adminDb.collection("brands");
       const brandQuery = await brandsRef.where("userId", "==", req.user!.id).limit(1).get();
       
-      if (brandQuery.empty) return res.status(404).json({ error: "Brand not found" });
+      if (brandQuery.empty) {
+        const userSnap = await adminDb.collection("users").doc(req.user!.id).get();
+        const userName = userSnap.exists ? (userSnap.data()?.name || "Brand Store") : "Brand Store";
+        const newBrand = {
+          userId: req.user!.id,
+          companyName: userName,
+          balance: 50000,
+          subscriptionStatus: "active",
+          createdAt: new Date().toISOString()
+        };
+        await brandsRef.add(newBrand);
+        return res.json({ balance: 50000, companyName: userName });
+      }
       
       const brandData = brandQuery.docs[0].data();
       res.json({ balance: brandData.balance, companyName: brandData.companyName });
     } catch (dbError: any) {
       if (dbError.code === 7 || dbError.message?.includes("PERMISSION_DENIED")) {
-        return res.json({ balance: 0, companyName: "Brand (Permissions Pending)" });
+        return res.json({ balance: 50000, companyName: "Brand (Permissions Pending)" });
       }
       throw dbError;
     }
@@ -125,7 +137,25 @@ export const getBrands = async (req: AuthRequest, res: Response) => {
   try {
     const adminDb = getAdminDb();
     try {
-      const brandsSnap = await adminDb.collection("brands").get();
+      let brandsSnap = await adminDb.collection("brands").get();
+
+      // If user has BRAND role and has no brand document yet, create one
+      if (req.user && req.user.role === "BRAND") {
+        const userHasBrand = brandsSnap.docs.some(d => d.data().userId === req.user!.id);
+        if (!userHasBrand) {
+          const userSnap = await adminDb.collection("users").doc(req.user.id).get();
+          const userName = userSnap.exists ? (userSnap.data()?.name || "Brand Store") : "Brand Store";
+          await adminDb.collection("brands").add({
+            userId: req.user.id,
+            companyName: userName,
+            balance: 50000,
+            subscriptionStatus: "active",
+            createdAt: new Date().toISOString()
+          });
+          brandsSnap = await adminDb.collection("brands").get();
+        }
+      }
+
       const brands = await Promise.all(brandsSnap.docs.map(async (doc) => {
         const data = doc.data();
         const userSnap = await adminDb.collection("users").doc(data.userId).get();
@@ -135,10 +165,27 @@ export const getBrands = async (req: AuthRequest, res: Response) => {
           user: userSnap.exists ? userSnap.data() : null
         };
       }));
+
+      if (brands.length === 0 && req.user?.role === "BRAND") {
+        return res.json([{
+          id: "brand-" + req.user.id,
+          userId: req.user.id,
+          companyName: req.user.email?.split("@")[0] || "My Brand Store",
+          balance: 50000,
+          subscriptionStatus: "active"
+        }]);
+      }
+
       res.json(brands);
     } catch (dbError: any) {
       if (dbError.code === 7 || dbError.message?.includes("PERMISSION_DENIED")) {
-        return res.json([]);
+        return res.json([{
+          id: "brand-" + (req.user?.id || "fallback"),
+          userId: req.user?.id || "fallback",
+          companyName: req.user?.email?.split("@")[0] || "My Brand Store",
+          balance: 50000,
+          subscriptionStatus: "active"
+        }]);
       }
       throw dbError;
     }

@@ -60,22 +60,18 @@ export const loginWithEmail = (email: string, pass: string) => signInWithEmailAn
 
 // Connection Test - Minimal and non-blocking
 async function testConnection() {
-    try {
-      // Small delay to allow transport to warm up
-      await new Promise(r => setTimeout(r, 500));
-      
-      const testDoc = doc(db, 'users', 'connection-test');
-      await getDocFromServer(testDoc).catch(() => {
-          // If server call fails, fallback to standard get (might use cache)
-          return getDoc(testDoc);
-      });
-      
-      console.log("Firestore connection stabilized");
-    } catch (error: any) {
-    if (error.message.includes('the client is offline') || error.code === 'unavailable') {
-      console.warn("Firestore is operating in Offline/Cached mode. This is often normal during initial load in sandboxed environments.");
-    } else if (!error.message.includes('permission-denied')) {
-      console.error("Firestore connectivity notice:", error.message);
+  try {
+    // Small delay to allow transport to warm up
+    await new Promise(r => setTimeout(r, 500));
+    
+    const testDoc = doc(db, 'test', 'connection');
+    await getDocFromServer(testDoc).catch(() => {
+      return getDoc(testDoc);
+    });
+    console.log("Firestore connection stabilized");
+  } catch (error: any) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.warn("Firestore client is offline or initializing.");
     }
   }
 }

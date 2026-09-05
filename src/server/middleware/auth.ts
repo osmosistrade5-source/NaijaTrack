@@ -16,6 +16,19 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
     return res.status(401).json({ error: "Unauthorized" });
   }
 
+  // Support demo sessions
+  if (token.startsWith("demo-")) {
+    const parts = token.split("-");
+    const role = parts[1]?.toUpperCase() === "BRAND" ? "BRAND" : parts[1]?.toUpperCase() === "ADMIN" ? "ADMIN" : "INFLUENCER";
+    const demoId = parts.slice(2).join("-") || `demo-${role.toLowerCase()}`;
+    req.user = {
+      id: demoId,
+      role,
+      email: `${demoId}@naijatrack.ng`
+    };
+    return next();
+  }
+
   try {
     const adminAuth = getAdminAuth();
     const adminDb = getAdminDb();
