@@ -1969,6 +1969,10 @@ export default function App() {
   const [intendedRole, setIntendedRole] = useState<'BRAND' | 'INFLUENCER' | null>(null);
 
   useEffect(() => {
+    document.title = "naija-track";
+  }, []);
+
+  useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       try {
         if (firebaseUser) {
